@@ -1,0 +1,19 @@
+services:
+  personal-hub:
+    build:
+      context: .
+    container_name: personal-hub
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 5173
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SUBSCRIPTION_EMAIL_FROM: ${SUBSCRIPTION_EMAIL_FROM:-}
+    ports:
+      - "127.0.0.1:5173:5173"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5173/healthz | grep -q '\"ok\":true'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

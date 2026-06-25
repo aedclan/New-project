@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>个人工作台</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="startup-notice" id="startupNotice">
+      <div class="startup-notice__card">
+        <strong>页面尚未完成初始化</strong>
+        <p>不要直接双击 `index.html` 打开。当前版本需要通过本地开发服务器访问，脚本才能正常加载。</p>
+        <p>推荐启动方式：运行 `.\scripts\start-dev.ps1`，然后打开 `http://127.0.0.1:5173`。</p>
+      </div>
+    </div>
+
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark">P</div>
+          <div>
+            <strong>个人工作台</strong>
+            <span>Content Hub</span>
+          </div>
+        </div>
+
+        <nav class="nav-list" id="navList"></nav>
+
+        <section class="sidebar-card">
+          <span class="eyebrow">本周进度</span>
+          <strong id="sidebarProgress">0%</strong>
+          <div class="mini-progress">
+            <span id="sidebarProgressBar"></span>
+          </div>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <label class="search-box" for="globalSearch">
+            <span>&#8981;</span>
+            <input id="globalSearch" type="search" placeholder="搜索事项、账单、笔记、项目集..." />
+          </label>
+          <div class="topbar-actions">
+            <button class="icon-button" id="themeToggle" type="button" aria-label="切换主题">&#9680;</button>
+            <button class="ghost-button" id="authButton" type="button">登录</button>
+            <button class="primary-button" id="quickAddButton" type="button">+ 新增</button>
+          </div>
+        </header>
+
+        <section class="page-head">
+          <div>
+            <p class="eyebrow" id="pageEyebrow">Dashboard</p>
+            <h1 id="pageTitle">总览</h1>
+          </div>
+          <div class="filter-row" id="filterRow"></div>
+        </section>
+
+        <section class="content-area" id="contentArea"></section>
+      </main>
+    </div>
+
+    <nav class="mobile-tabs" id="mobileTabs" aria-label="移动端导航"></nav>
+
+    <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+    <aside class="drawer" id="detailDrawer" aria-label="详情" aria-hidden="true">
+      <div class="drawer-head">
+        <div>
+          <p class="eyebrow" id="drawerType">Detail</p>
+          <h2 id="drawerTitle">详情</h2>
+        </div>
+        <button class="icon-button" id="closeDrawer" type="button" aria-label="关闭">&times;</button>
+      </div>
+      <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <dialog class="modal" id="entryModal">
+      <form method="dialog" class="modal-panel" id="entryForm">
+        <input type="hidden" name="entryId" />
+        <input type="hidden" name="entryMode" value="create" />
+        <input type="hidden" name="originalType" value="tasks" />
+
+        <div class="drawer-head">
+          <div>
+            <p class="eyebrow" id="entryFormEyebrow">Quick Add</p>
+            <h2 id="entryFormTitle">新增内容</h2>
+          </div>
+          <button class="icon-button" value="cancel" type="submit" formnovalidate aria-label="关闭">&times;</button>
+        </div>
+
+        <div class="modal-scroll">
+          <label>
+            类型
+            <select name="type" id="entryType">
+              <option value="tasks">事项</option>
+              <option value="notes">笔记</option>
+              <option value="bills">生活收支</option>
+              <option value="collections">项目集</option>
+            </select>
+          </label>
+
+          <label>
+            标题
+            <input name="title" required placeholder="输入标题" />
+          </label>
+
+          <label>
+            描述 / 备注
+            <textarea name="description" rows="4" placeholder="写一点说明"></textarea>
+          </label>
+
+          <div class="form-grid">
+            <label>
+              标签
+              <input name="tags" placeholder="用逗号分隔" />
+            </label>
+            <label>
+              分类
+              <input name="category" placeholder="例如：设计、网站、工具" />
+            </label>
+          </div>
+
+          <section class="field-section" data-section="tasks">
+            <div class="form-grid">
+              <label>
+                状态
+                <select name="taskStatus">
+                  <option value="待处理">待处理</option>
+                  <option value="进行中">进行中</option>
+                  <option value="已完成">已完成</option>
+                </select>
+              </label>
+              <label>
+                优先级
+                <select name="priority">
+                  <option value="高">高</option>
+                  <option value="中">中</option>
+                  <option value="低">低</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              截止日期
+              <input name="dueDate" type="text" data-date-input placeholder="YYYY-MM-DD" autocomplete="off" />
+            </label>
+            <label>
+              关联项目集
+              <input name="taskProjectId" placeholder="例如：个人网站升级" />
+            </label>
+          </section>
+
+          <section class="field-section" data-section="bills">
+            <div class="form-grid">
+              <label>
+                类型
+                <select name="billType">
+                  <option value="支出">支出</option>
+                  <option value="收入">收入</option>
+                </select>
+              </label>
+              <label>
+                金额
+                <input name="amount" type="number" step="0.01" placeholder="输入金额" />
+              </label>
+            </div>
+            <label>
+              日期
+              <input name="billDate" type="text" data-date-input placeholder="YYYY-MM-DD" autocomplete="off" />
+            </label>
+            <div class="form-grid">
+              <label>
+                来源
+                <select name="billSource">
+                  <option value="手动">手动</option>
+                  <option value="微信">微信</option>
+                  <option value="支付宝">支付宝</option>
+                  <option value="Excel 导入">Excel 导入</option>
+                </select>
+              </label>
+              <label>
+                承担人
+                <select name="billPayer">
+                  <option value="家庭账户">家庭账户</option>
+                  <option value="男方">男方</option>
+                  <option value="女方">女方</option>
+                  <option value="共同">共同</option>
+                  <option value="孩子相关">孩子相关</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-grid">
+              <label>
+                家庭成员
+                <select name="billFamilyMember">
+                  <option value="">不指定</option>
+                  <option value="大宝">大宝</option>
+                  <option value="二宝">二宝</option>
+                  <option value="父母">父母</option>
+                  <option value="家庭共同">家庭共同</option>
+                </select>
+              </label>
+              <label>
+                固定支出
+                <select name="billFixedExpense">
+                  <option value="">普通收支</option>
+                  <option value="房贷">房贷</option>
+                  <option value="车贷">车贷</option>
+                  <option value="保险">保险</option>
+                  <option value="学费">学费</option>
+                  <option value="订阅">订阅</option>
+                  <option value="水电燃气">水电燃气</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-grid">
+              <label>
+                还款日
+                <input name="mortgageDueDay" type="number" min="1" max="31" placeholder="房贷可填，例如 20" />
+              </label>
+              <label>
+                剩余期数
+                <input name="mortgageRemainingTerms" type="number" min="0" placeholder="房贷可填" />
+              </label>
+            </div>
+            <label>
+              关联项目
+              <input name="projectId" placeholder="例如：个人网站升级" />
+            </label>
+          </section>
+
+          <section class="field-section" data-section="notes">
+            <div class="form-grid">
+              <label>
+                笔记类型
+                <select name="noteType">
+                  <option value="note">笔记</option>
+                  <option value="idea">灵感</option>
+                  <option value="link">链接</option>
+                  <option value="summary">回顾</option>
+                </select>
+              </label>
+              <label>
+                收录链接
+                <input name="sourceUrl" type="url" placeholder="https://example.com" />
+              </label>
+            </div>
+            <label>
+              Markdown 内容
+              <textarea name="noteContent" rows="8" placeholder="支持标题、列表、引用、代码和链接"></textarea>
+            </label>
+            <label>
+              关联项目集
+              <input name="noteProjectId" placeholder="例如：个人网站升级" />
+            </label>
+            <div class="note-preview-wrap">
+              <span class="note-preview-label">预览</span>
+              <div class="markdown-preview" id="noteMarkdownPreview"></div>
+            </div>
+            <div class="checkbox-row">
+              <label class="checkbox-label">
+                <input name="pinned" type="checkbox" />
+                <span>置顶笔记</span>
+              </label>
+            </div>
+          </section>
+
+          <section class="field-section" data-section="collections">
+            <div class="form-grid">
+              <label>
+                状态
+                <select name="collectionStatus">
+                  <option value="规划中">规划中</option>
+                  <option value="进行中">进行中</option>
+                  <option value="已完成">已完成</option>
+                </select>
+              </label>
+              <label>
+                进度
+                <input name="progress" type="number" min="0" max="100" step="1" placeholder="0-100" />
+              </label>
+            </div>
+          </section>
+
+          <p class="hint" id="entryFormHint">保存后会写入本地浏览器存储。</p>
+        </div>
+
+        <div class="modal-actions">
+          <button class="ghost-button" value="cancel" type="submit" formnovalidate>取消</button>
+          <button class="primary-button" value="default" id="saveEntry" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="authModal">
+      <form method="dialog" class="modal-panel compact-modal" id="authForm">
+        <div class="drawer-head">
+          <div>
+            <p class="eyebrow">Login</p>
+            <h2>登录后可编辑</h2>
+          </div>
+          <button class="icon-button" value="cancel" type="submit" formnovalidate aria-label="关闭">&times;</button>
+        </div>
+
+        <div class="modal-scroll">
+          <label>
+            账号
+            <input name="username" autocomplete="username" required placeholder="admin" />
+          </label>
+          <label>
+            密码
+            <input name="password" type="password" autocomplete="current-password" required placeholder="hub2026" />
+          </label>
+          <p class="hint">本地原型账号：`admin / hub2026`。正式版会升级为真实登录系统。</p>
+        </div>
+
+        <div class="modal-actions">
+          <button class="ghost-button" value="cancel" type="submit" formnovalidate>取消</button>
+          <button class="primary-button" value="default" type="submit">登录</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="contactDetailModal">
+      <div class="modal-panel contact-detail-modal">
+        <div class="drawer-head">
+          <div>
+            <h2 id="contactDetailTitle">人物详情</h2>
+          </div>
+          <button class="icon-button" id="closeContactDetail" type="button" aria-label="关闭">&times;</button>
+        </div>
+        <div class="modal-scroll" id="contactDetailBody"></div>
+      </div>
+    </dialog>
+
+    <script type="module" src="src/main.js"></script>
+    <div class="app-version-badge" id="appVersionBadge">v0.21.0</div>
+  </body>
+</html>

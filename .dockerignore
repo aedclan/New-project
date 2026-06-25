@@ -1,0 +1,8 @@
+.git
+.agents
+node_modules
+dist
+*.log
+.env
+test-fixtures
+wechat_banner_text_*.png
