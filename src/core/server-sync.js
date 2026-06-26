@@ -1,5 +1,17 @@
 import { SERVER_SYNC_AUTO_KEY, SERVER_SYNC_LAST_PUSH_KEY, SERVER_SYNC_TOKEN_KEY } from "../config/constants.js";
 
+const collectionKeys = ["tasks", "bills", "notes", "collections", "subscriptions", "contacts", "favorEvents", "bookmarks"];
+const collectionLabels = {
+  tasks: "事项",
+  bills: "生活收支",
+  notes: "笔记",
+  collections: "项目集",
+  subscriptions: "订阅",
+  contacts: "人物",
+  favorEvents: "人情往来",
+  bookmarks: "收藏",
+};
+
 function getStoredToken() {
   return localStorage.getItem(SERVER_SYNC_TOKEN_KEY) || "";
 }
@@ -14,6 +26,10 @@ function saveStoredToken(token) {
   return value;
 }
 
+function resolveToken(token) {
+  return String(token || "").trim() || getStoredToken();
+}
+
 async function readJsonResponse(response) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
@@ -22,24 +38,11 @@ async function readJsonResponse(response) {
   return payload;
 }
 
-function authHeaders(token) {
-  return {
-    "Content-Type": "application/json",
-    "X-Personal-Hub-Token": token,
-  };
+function authHeaders(token, includeJson = true) {
+  const headers = includeJson ? { "Content-Type": "application/json" } : {};
+  if (token) headers["X-Personal-Hub-Token"] = token;
+  return headers;
 }
-
-const collectionKeys = ["tasks", "bills", "notes", "collections", "subscriptions", "contacts", "favorEvents", "bookmarks"];
-const collectionLabels = {
-  tasks: "事项",
-  bills: "生活收支",
-  notes: "笔记",
-  collections: "项目集",
-  subscriptions: "订阅",
-  contacts: "人物",
-  favorEvents: "人情往来",
-  bookmarks: "收藏",
-};
 
 function itemTimestamp(item) {
   const value = item?.updatedAt || item?.createdAt || item?.date || item?.dueDate || "";
@@ -206,16 +209,17 @@ export function saveServerSyncAutoEnabled(enabled) {
 }
 
 export async function checkServerSyncStatus() {
-  const response = await fetch("/api/data/status", { headers: { Accept: "application/json" } });
+  const response = await fetch("/api/data/status", { headers: { Accept: "application/json" }, credentials: "same-origin" });
   return readJsonResponse(response);
 }
 
 export async function pushServerData(data, token) {
-  const savedToken = saveStoredToken(String(token || "").trim() || getStoredToken());
-  if (!savedToken) throw new Error("请先输入服务器同步密钥。");
+  const savedToken = resolveToken(token);
+  if (String(token || "").trim()) saveStoredToken(savedToken);
   const response = await fetch("/api/data", {
     method: "PUT",
     headers: authHeaders(savedToken),
+    credentials: "same-origin",
     body: JSON.stringify({ data }),
   });
   const result = await readJsonResponse(response);
@@ -224,10 +228,11 @@ export async function pushServerData(data, token) {
 }
 
 export async function pullServerData(token) {
-  const savedToken = saveStoredToken(String(token || "").trim() || getStoredToken());
-  if (!savedToken) throw new Error("请先输入服务器同步密钥。");
+  const savedToken = resolveToken(token);
+  if (String(token || "").trim()) saveStoredToken(savedToken);
   const response = await fetch("/api/data", {
-    headers: authHeaders(savedToken),
+    headers: authHeaders(savedToken, false),
+    credentials: "same-origin",
   });
   return readJsonResponse(response);
 }

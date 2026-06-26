@@ -3276,7 +3276,7 @@ function renderSettings(elements, data, ui) {
         <h2>服务器数据同步</h2>
         <span class="results-count">V0.25 数据持久化底座</span>
       </div>
-      <p class="panel-copy">用于把当前浏览器数据保存到 VPS 数据卷，或从 VPS 恢复到当前浏览器。读取服务器会覆盖本地数据，执行前建议先导出 JSON。</p>
+      <p class="panel-copy">登录服务器账号后会自动从 VPS 读取数据；同步密钥保留为备用方式。手动读取会覆盖当前浏览器数据，执行前建议先导出 JSON。</p>
       <div class="server-sync-grid">
         <label>
           同步密钥
@@ -3284,8 +3284,8 @@ function renderSettings(elements, data, ui) {
         </label>
         <article class="server-sync-status-card">
           <span>当前浏览器</span>
-          <strong>${serverSyncState.hasToken ? "已保存密钥" : "未保存密钥"}</strong>
-          <em>${serverSyncState.lastPushedAt ? `最近保存：${escapeHtml(serverSyncState.lastPushedAt)}` : "密钥只保存在当前浏览器，用于访问 /api/data。"}</em>
+          <strong>${serverSyncState.hasToken ? "已保存备用密钥" : "优先使用登录会话"}</strong>
+          <em>${serverSyncState.lastPushedAt ? `最近保存：${escapeHtml(serverSyncState.lastPushedAt)}` : "登录账号可直接同步；密钥只作为未登录时的备用口令。"}</em>
         </article>
       </div>
       <label class="setting-toggle server-sync-auto-toggle">

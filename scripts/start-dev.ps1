@@ -12,4 +12,21 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
 }
 
 Set-Location $projectRoot
+
+$envFile = Join-Path $projectRoot ".env"
+if (Test-Path $envFile) {
+  Get-Content $envFile | ForEach-Object {
+    $line = $_.Trim()
+    if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) {
+      return
+    }
+    $parts = $line.Split("=", 2)
+    $name = $parts[0].Trim()
+    $value = $parts[1].Trim()
+    if ($name) {
+      [Environment]::SetEnvironmentVariable($name, $value, "Process")
+    }
+  }
+}
+
 & $node "scripts/dev-server.mjs"

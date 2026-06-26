@@ -8,7 +8,8 @@ export function createAutoServerSync(app, authController) {
 
   async function pushNow() {
     const syncState = loadServerSyncState();
-    if (!syncState.autoEnabled || !syncState.hasToken || !authController.isAuthenticated) return false;
+    const canUseServerAuth = Boolean(authController.isServerAuthenticated);
+    if (!syncState.autoEnabled || (!syncState.hasToken && !canUseServerAuth) || !authController.isAuthenticated) return false;
 
     if (running) {
       queued = true;

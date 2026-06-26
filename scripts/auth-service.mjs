@@ -119,7 +119,7 @@ function cleanupExpiredSessions(database = getDb()) {
   database.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(new Date().toISOString());
 }
 
-function getCurrentUser(request) {
+export function getCurrentUser(request) {
   const token = parseCookies(request.headers.cookie || "").personal_hub_session;
   if (!token) return null;
   const database = getDb();

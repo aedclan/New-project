@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { getCurrentUser } from "./auth-service.mjs";
 
 const dataFilePath = resolve(process.env.PERSONAL_HUB_DATA_FILE || "/app/data/personal-hub-data.json");
 const syncToken = String(process.env.PERSONAL_HUB_SYNC_TOKEN || "").trim();
@@ -10,6 +11,7 @@ function jsonResponse(response, status, payload) {
 }
 
 function isAuthorized(request) {
+  if (getCurrentUser(request)) return true;
   if (!syncToken) return false;
   const auth = String(request.headers.authorization || "");
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
@@ -60,9 +62,11 @@ export async function handlePersistentDataRequest(request, response) {
   const url = new URL(request.url || "/", "http://localhost");
 
   if (request.method === "GET" && url.pathname === "/api/data/status") {
+    const authenticated = Boolean(getCurrentUser(request));
     jsonResponse(response, 200, {
       ok: true,
-      configured: Boolean(syncToken),
+      configured: Boolean(syncToken || authenticated),
+      authenticated,
       hasData: existsSync(dataFilePath),
       dataFile: dataFilePath,
     });

@@ -15,6 +15,10 @@ export function createAuthController(elements) {
     sessionChecked: false,
   };
 
+  function notifyServerLogin() {
+    window.dispatchEvent(new CustomEvent("personalHub:serverLogin", { detail: { user: state.user } }));
+  }
+
   function renderAuthState() {
     document.body.classList.toggle("is-locked", !state.isAuthenticated);
     authButton.textContent = state.isAuthenticated ? "退出" : "登录";
@@ -57,10 +61,12 @@ export function createAuthController(elements) {
       state.serverConfigured = Boolean(session.configured);
       if (session.configured) {
         state.authMode = "server";
+        const wasServerAuthenticated = Boolean(state.isAuthenticated && state.user);
         state.isAuthenticated = Boolean(session.authenticated);
         state.user = session.user || null;
         if (state.isAuthenticated) {
           localStorage.setItem(AUTH_SESSION_KEY, "true");
+          if (!wasServerAuthenticated && !options.silent) notifyServerLogin();
         } else {
           localStorage.removeItem(AUTH_SESSION_KEY);
         }
@@ -114,6 +120,7 @@ export function createAuthController(elements) {
         localStorage.setItem(AUTH_SESSION_KEY, "true");
         authModal.close();
         renderAuthState();
+        notifyServerLogin();
         return;
       } catch (error) {
         authHint.textContent = error.message || "服务器登录失败。";
@@ -146,6 +153,9 @@ export function createAuthController(elements) {
   return {
     get isAuthenticated() {
       return state.isAuthenticated;
+    },
+    get isServerAuthenticated() {
+      return state.isAuthenticated && state.authMode === "server";
     },
     requireAuth,
     ensureAuth,
