@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { getCurrentUser } from "./auth-service.mjs";
 
 const dataFilePath = resolve(process.env.PERSONAL_HUB_DATA_FILE || "/app/data/personal-hub-data.json");
@@ -40,21 +40,36 @@ function readRequestJson(request) {
   });
 }
 
-function readStoredData() {
-  if (!existsSync(dataFilePath)) return null;
-  return JSON.parse(readFileSync(dataFilePath, "utf8"));
+function userDataFilePath(user) {
+  return resolve(join(dirname(dataFilePath), "users", `user-${user.id}.json`));
 }
 
-function writeStoredData(data) {
-  mkdirSync(dirname(dataFilePath), { recursive: true });
+function resolveRequestDataFile(request) {
+  const user = getCurrentUser(request);
+  if (!user) return { user: null, filePath: dataFilePath, legacyFilePath: "" };
+  return {
+    user,
+    filePath: userDataFilePath(user),
+    legacyFilePath: user.role === "admin" ? dataFilePath : "",
+  };
+}
+
+function readStoredData(filePath, legacyFilePath = "") {
+  const targetPath = existsSync(filePath) ? filePath : legacyFilePath && existsSync(legacyFilePath) ? legacyFilePath : "";
+  if (!targetPath) return null;
+  return JSON.parse(readFileSync(targetPath, "utf8").replace(/^\uFEFF/, ""));
+}
+
+function writeStoredData(data, filePath) {
+  mkdirSync(dirname(filePath), { recursive: true });
   const payload = {
     version: 1,
     savedAt: new Date().toISOString(),
     data,
   };
-  const tempPath = `${dataFilePath}.tmp`;
+  const tempPath = `${filePath}.tmp`;
   writeFileSync(tempPath, JSON.stringify(payload, null, 2));
-  renameSync(tempPath, dataFilePath);
+  renameSync(tempPath, filePath);
   return payload;
 }
 
@@ -62,13 +77,15 @@ export async function handlePersistentDataRequest(request, response) {
   const url = new URL(request.url || "/", "http://localhost");
 
   if (request.method === "GET" && url.pathname === "/api/data/status") {
-    const authenticated = Boolean(getCurrentUser(request));
+    const { user, filePath, legacyFilePath } = resolveRequestDataFile(request);
+    const authenticated = Boolean(user);
     jsonResponse(response, 200, {
       ok: true,
       configured: Boolean(syncToken || authenticated),
       authenticated,
-      hasData: existsSync(dataFilePath),
-      dataFile: dataFilePath,
+      hasData: existsSync(filePath) || Boolean(legacyFilePath && existsSync(legacyFilePath)),
+      dataFile: filePath,
+      user: user ? { id: user.id, username: user.username, role: user.role } : null,
     });
     return true;
   }
@@ -84,7 +101,8 @@ export async function handlePersistentDataRequest(request, response) {
   }
 
   if (request.method === "GET") {
-    const stored = readStoredData();
+    const { filePath, legacyFilePath } = resolveRequestDataFile(request);
+    const stored = readStoredData(filePath, legacyFilePath);
     jsonResponse(response, 200, {
       ok: true,
       hasData: Boolean(stored),
@@ -95,12 +113,13 @@ export async function handlePersistentDataRequest(request, response) {
   }
 
   if (request.method === "PUT") {
+    const { filePath } = resolveRequestDataFile(request);
     const payload = await readRequestJson(request);
     if (!payload || typeof payload.data !== "object" || Array.isArray(payload.data)) {
       jsonResponse(response, 400, { ok: false, message: "缺少 data 对象。" });
       return true;
     }
-    const stored = writeStoredData(payload.data);
+    const stored = writeStoredData(payload.data, filePath);
     jsonResponse(response, 200, {
       ok: true,
       savedAt: stored.savedAt,

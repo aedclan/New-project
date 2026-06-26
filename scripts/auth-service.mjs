@@ -1,12 +1,15 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const dbFilePath = resolve(process.env.PERSONAL_HUB_AUTH_DB_FILE || "/app/data/personal-hub.sqlite");
+const dataFilePath = resolve(process.env.PERSONAL_HUB_DATA_FILE || "/app/data/personal-hub-data.json");
 const adminUsername = String(process.env.PERSONAL_HUB_ADMIN_USERNAME || "").trim();
 const adminPassword = String(process.env.PERSONAL_HUB_ADMIN_PASSWORD || "");
 const sessionMaxAgeSeconds = Number(process.env.PERSONAL_HUB_SESSION_MAX_AGE || 60 * 60 * 24 * 7);
+const registrationEnabled = process.env.PERSONAL_HUB_REGISTRATION_ENABLED === "true";
+const registrationCode = String(process.env.PERSONAL_HUB_REGISTRATION_CODE || "").trim();
 
 let db;
 
@@ -81,6 +84,7 @@ function getDb() {
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'admin',
+      disabled INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -92,6 +96,11 @@ function getDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
+
+  const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
+  if (!userColumns.includes("disabled")) {
+    db.exec("ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0");
+  }
 
   if (adminUsername && adminPassword) {
     const existing = db.prepare("SELECT id FROM users WHERE username = ?").get(adminUsername);
@@ -129,13 +138,76 @@ export function getCurrentUser(request) {
       `SELECT users.id, users.username, users.role
        FROM sessions
        JOIN users ON users.id = sessions.user_id
-       WHERE sessions.token_hash = ? AND sessions.expires_at > ?`,
+       WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND users.disabled = 0`,
     )
     .get(hashToken(token), new Date().toISOString());
 }
 
 function hasUsers() {
   return Number(getDb().prepare("SELECT COUNT(*) AS count FROM users").get().count || 0) > 0;
+}
+
+function publicUser(user) {
+  return user ? { id: user.id, username: user.username, role: user.role, disabled: Boolean(user.disabled) } : null;
+}
+
+function requireAdmin(request, response) {
+  const user = getCurrentUser(request);
+  if (!user) {
+    jsonResponse(response, 401, { ok: false, message: "请先登录管理员账号。" });
+    return null;
+  }
+  if (user.role !== "admin") {
+    jsonResponse(response, 403, { ok: false, message: "只有管理员可以管理用户。" });
+    return null;
+  }
+  return user;
+}
+
+function dataStatusForUser(userId, role) {
+  const userFile = resolve(join(dirname(dataFilePath), "users", `user-${userId}.json`));
+  const legacy = role === "admin" && existsSync(dataFilePath) && !existsSync(userFile);
+  const target = existsSync(userFile) ? userFile : legacy ? dataFilePath : "";
+  return {
+    hasData: Boolean(target),
+    dataFile: target || userFile,
+    dataBytes: target ? statSync(target).size : 0,
+    legacy,
+  };
+}
+
+function legacyDataStatus() {
+  return {
+    hasData: existsSync(dataFilePath),
+    dataFile: dataFilePath,
+    dataBytes: existsSync(dataFilePath) ? statSync(dataFilePath).size : 0,
+  };
+}
+
+function userDataFilePath(userId) {
+  return resolve(join(dirname(dataFilePath), "users", `user-${userId}.json`));
+}
+
+function validateUsername(username) {
+  return /^[a-zA-Z0-9_.@-]{3,32}$/.test(username);
+}
+
+function validatePassword(password) {
+  return String(password || "").length >= 8;
+}
+
+function createSession(user) {
+  cleanupExpiredSessions();
+  const token = randomBytes(32).toString("base64url");
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + sessionMaxAgeSeconds * 1000).toISOString();
+  getDb().prepare("INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)").run(
+    hashToken(token),
+    user.id,
+    expiresAt,
+    now.toISOString(),
+  );
+  return token;
 }
 
 export async function handleAuthRequest(request, response) {
@@ -148,9 +220,153 @@ export async function handleAuthRequest(request, response) {
     jsonResponse(response, 200, {
       ok: true,
       configured,
+      registrationEnabled,
+      registrationCodeRequired: Boolean(registrationCode),
       authenticated: Boolean(user),
-      user: user ? { username: user.username, role: user.role } : null,
+      user: publicUser(user),
     });
+    return true;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/auth/users") {
+    const admin = requireAdmin(request, response);
+    if (!admin) return true;
+    const users = getDb()
+      .prepare(
+        `SELECT id, username, role, disabled, created_at AS createdAt, updated_at AS updatedAt
+         FROM users
+         ORDER BY role = 'admin' DESC, created_at ASC`,
+      )
+      .all()
+      .map((user) => ({
+        ...publicUser(user),
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+        data: dataStatusForUser(user.id, user.role),
+        isCurrent: user.id === admin.id,
+      }));
+    jsonResponse(response, 200, { ok: true, users, legacyData: legacyDataStatus() });
+    return true;
+  }
+
+  const userActionMatch = url.pathname.match(/^\/api\/auth\/users\/(\d+)\/(status|password|migrate)$/);
+  if (request.method === "POST" && userActionMatch) {
+    const admin = requireAdmin(request, response);
+    if (!admin) return true;
+    const userId = Number(userActionMatch[1]);
+    const action = userActionMatch[2];
+    const target = getDb().prepare("SELECT id, username, role, disabled FROM users WHERE id = ?").get(userId);
+    if (!target) {
+      jsonResponse(response, 404, { ok: false, message: "用户不存在。" });
+      return true;
+    }
+    const payload = await readRequestJson(request);
+    const now = new Date().toISOString();
+
+    if (action === "status") {
+      const disabled = Boolean(payload.disabled);
+      if (target.id === admin.id && disabled) {
+        jsonResponse(response, 400, { ok: false, message: "不能禁用当前登录的管理员账号。" });
+        return true;
+      }
+      getDb().prepare("UPDATE users SET disabled = ?, updated_at = ? WHERE id = ?").run(disabled ? 1 : 0, now, userId);
+      if (disabled) getDb().prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+      jsonResponse(response, 200, { ok: true, user: publicUser({ ...target, disabled }) });
+      return true;
+    }
+
+    if (action === "password") {
+      const password = String(payload.password || "");
+      if (!validatePassword(password)) {
+        jsonResponse(response, 400, { ok: false, message: "密码至少需要 8 位。" });
+        return true;
+      }
+      getDb().prepare("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?").run(hashPassword(password), now, userId);
+      getDb().prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+      jsonResponse(response, 200, { ok: true });
+      return true;
+    }
+    if (action === "migrate") {
+      const source = String(payload.source || "legacy");
+      const overwrite = Boolean(payload.overwrite);
+      if (source !== "legacy") {
+        jsonResponse(response, 400, { ok: false, message: "Migration source is not supported." });
+        return true;
+      }
+      if (!existsSync(dataFilePath)) {
+        jsonResponse(response, 404, { ok: false, message: "Legacy global data file was not found." });
+        return true;
+      }
+      const targetPath = userDataFilePath(userId);
+      if (existsSync(targetPath) && !overwrite) {
+        jsonResponse(response, 409, { ok: false, message: "Target user already has data. Confirm overwrite before migration." });
+        return true;
+      }
+      mkdirSync(dirname(targetPath), { recursive: true });
+      copyFileSync(dataFilePath, targetPath);
+      getDb().prepare("UPDATE users SET updated_at = ? WHERE id = ?").run(now, userId);
+      jsonResponse(response, 200, {
+        ok: true,
+        user: publicUser({ ...target, disabled: Boolean(target.disabled) }),
+        data: dataStatusForUser(userId, target.role),
+        legacyData: legacyDataStatus(),
+        message: "Legacy global data has been migrated to the selected user.",
+      });
+      return true;
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/register") {
+    if (!registrationEnabled) {
+      jsonResponse(response, 403, { ok: false, configured: hasUsers(), registrationEnabled: false, message: "服务器未开启账号注册。" });
+      return true;
+    }
+
+    const payload = await readRequestJson(request);
+    const username = String(payload.username || "").trim();
+    const password = String(payload.password || "");
+    const confirmPassword = String(payload.confirmPassword || "");
+    const code = String(payload.registrationCode || "").trim();
+
+    if (!validateUsername(username)) {
+      jsonResponse(response, 400, { ok: false, message: "账号需为 3-32 位，可使用字母、数字、下划线、点、@ 或短横线。" });
+      return true;
+    }
+    if (!validatePassword(password)) {
+      jsonResponse(response, 400, { ok: false, message: "密码至少需要 8 位。" });
+      return true;
+    }
+    if (password !== confirmPassword) {
+      jsonResponse(response, 400, { ok: false, message: "两次输入的密码不一致。" });
+      return true;
+    }
+    if (registrationCode && code !== registrationCode) {
+      jsonResponse(response, 403, { ok: false, message: "注册码不正确。" });
+      return true;
+    }
+
+    const database = getDb();
+    const existing = database.prepare("SELECT id FROM users WHERE username = ?").get(username);
+    if (existing) {
+      jsonResponse(response, 409, { ok: false, message: "账号已存在，请直接登录。" });
+      return true;
+    }
+
+    const now = new Date().toISOString();
+    const result = database.prepare("INSERT INTO users (username, password_hash, role, created_at, updated_at) VALUES (?, ?, 'user', ?, ?)").run(
+      username,
+      hashPassword(password),
+      now,
+      now,
+    );
+    const user = database.prepare("SELECT id, username, role FROM users WHERE id = ?").get(result.lastInsertRowid);
+    const token = createSession(user);
+    jsonResponse(
+      response,
+      201,
+      { ok: true, configured: true, authenticated: true, user: publicUser(user) },
+      { "Set-Cookie": sessionCookie(token) },
+    );
     return true;
   }
 
@@ -162,26 +378,21 @@ export async function handleAuthRequest(request, response) {
     const payload = await readRequestJson(request);
     const username = String(payload.username || "").trim();
     const password = String(payload.password || "");
-    const user = getDb().prepare("SELECT id, username, role, password_hash FROM users WHERE username = ?").get(username);
+    const user = getDb().prepare("SELECT id, username, role, password_hash, disabled FROM users WHERE username = ?").get(username);
     if (!user || !verifyPassword(password, user.password_hash)) {
       jsonResponse(response, 401, { ok: false, configured: true, message: "账号或密码不正确。" });
       return true;
     }
+    if (user.disabled) {
+      jsonResponse(response, 403, { ok: false, configured: true, message: "账号已被禁用，请联系管理员。" });
+      return true;
+    }
 
-    cleanupExpiredSessions();
-    const token = randomBytes(32).toString("base64url");
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + sessionMaxAgeSeconds * 1000).toISOString();
-    getDb().prepare("INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)").run(
-      hashToken(token),
-      user.id,
-      expiresAt,
-      now.toISOString(),
-    );
+    const token = createSession(user);
     jsonResponse(
       response,
       200,
-      { ok: true, configured: true, authenticated: true, user: { username: user.username, role: user.role } },
+      { ok: true, configured: true, authenticated: true, user: publicUser(user) },
       { "Set-Cookie": sessionCookie(token) },
     );
     return true;

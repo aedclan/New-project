@@ -3851,6 +3851,127 @@ h2 {
   white-space: nowrap;
 }
 
+.user-management-modal .user-management-panel {
+  width: min(880px, calc(100vw - 24px));
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.user-management-body {
+  overflow: auto;
+  padding: 0 18px 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.user-management-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.user-management-summary article {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.user-management-summary span,
+.user-management-row span,
+.user-management-row em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.user-management-summary strong {
+  color: var(--text);
+  font-size: 22px;
+}
+
+.user-migration-panel {
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.user-migration-panel strong,
+.user-migration-panel span,
+.user-migration-panel em {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-migration-panel strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.user-migration-panel span,
+.user-migration-panel em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.user-migration-panel.is-empty {
+  border-color: var(--line);
+  background: var(--surface-2);
+}
+
+.user-management-list {
+  display: grid;
+  gap: 8px;
+}
+
+.user-management-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.user-management-row.is-disabled {
+  border-color: color-mix(in srgb, var(--danger) 26%, var(--line));
+  background: color-mix(in srgb, var(--danger) 4%, var(--surface));
+}
+
+.user-management-row strong,
+.user-management-row span,
+.user-management-row em {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-management-row strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.user-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
+}
+
 .settings-form-section {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -4193,6 +4314,36 @@ tr:last-child td {
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
+}
+
+.auth-mode-switch {
+  margin: 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 4px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.auth-mode-switch button {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 10px;
+  font-weight: 800;
+}
+
+.auth-mode-switch button.is-active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+}
+
+.auth-register-field[hidden] {
+  display: none !important;
 }
 
 .modal-panel input,

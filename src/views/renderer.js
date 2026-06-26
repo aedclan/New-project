@@ -3302,6 +3302,17 @@ function renderSettings(elements, data, ui) {
 
     <section class="panel settings-section">
       <div class="panel-head">
+        <h2>账号与多用户</h2>
+        <span class="results-count">注册 / 用户 / 数据隔离</span>
+      </div>
+      <p class="panel-copy">用于管理员查看服务器用户、禁用账号、重置密码，并确认每个用户是否已有独立数据文件。</p>
+      <div class="settings-action-row">
+        <button class="ghost-button" id="openUserManagement" type="button">打开用户管理</button>
+      </div>
+    </section>
+
+    <section class="panel settings-section">
+      <div class="panel-head">
         <h2>财务数据管理</h2>
         <span class="results-count">微信 / 支付宝 / Excel / CSV</span>
       </div>

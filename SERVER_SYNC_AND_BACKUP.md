@@ -49,6 +49,8 @@ PERSONAL_HUB_BACKUP_ON_START=false
 PERSONAL_HUB_ADMIN_USERNAME=admin
 PERSONAL_HUB_ADMIN_PASSWORD=请换成一个强密码
 PERSONAL_HUB_SESSION_MAX_AGE=604800
+PERSONAL_HUB_REGISTRATION_ENABLED=false
+PERSONAL_HUB_REGISTRATION_CODE=
 ```
 
 `PERSONAL_HUB_ADMIN_USERNAME` 和 `PERSONAL_HUB_ADMIN_PASSWORD` 是网页真实登录账号。登录成功后，网页可以直接读取和保存服务器数据。
@@ -66,6 +68,8 @@ PERSONAL_HUB_BACKUP_ON_START=false
 PERSONAL_HUB_ADMIN_USERNAME=admin
 PERSONAL_HUB_ADMIN_PASSWORD=ChangeThisAdminPassword2026
 PERSONAL_HUB_SESSION_MAX_AGE=604800
+PERSONAL_HUB_REGISTRATION_ENABLED=false
+PERSONAL_HUB_REGISTRATION_CODE=
 ```
 
 保存后重建容器：
@@ -110,6 +114,52 @@ curl http://127.0.0.1:5173/api/auth/session
 ```
 
 这个文件同样位于 Docker 数据卷 `/app/data` 中，容器重建后不会丢失。
+
+每个用户的数据会单独保存：
+
+```text
+/app/data/users/user-用户ID.json
+```
+
+管理员账号首次升级时，如果自己的用户数据文件还不存在，会兼容读取旧的 `/app/data/personal-hub-data.json`；保存后会写入自己的用户数据文件。普通注册用户只会读写自己的数据文件，互相隔离。
+
+### 开启注册
+
+如果需要开放注册，在 `.env` 中设置：
+
+```env
+PERSONAL_HUB_REGISTRATION_ENABLED=true
+PERSONAL_HUB_REGISTRATION_CODE=请换成一个只告诉家人的注册码
+```
+
+然后重建容器：
+
+```bash
+docker compose up -d --build
+```
+
+注册完成后，如果不再需要新账号注册，建议改回：
+
+```env
+PERSONAL_HUB_REGISTRATION_ENABLED=false
+```
+
+### 管理用户
+
+管理员登录后进入：
+
+```text
+设置 -> 账号与多用户 -> 打开用户管理
+```
+
+当前用户管理支持：
+
+- 查看所有用户。
+- 查看用户是否已有独立数据文件。
+- 禁用或启用普通用户。
+- 重置用户密码。
+
+禁用用户后，该用户现有登录会话会被清除，需要管理员重新启用后才能登录。
 
 第一次配置管理员账号时，在 `.env` 中填写：
 
@@ -345,3 +395,35 @@ docker compose up -d
 2. 登录后自动从服务器读取数据。
 3. 保存数据时自动写入服务器。
 4. 多用户隔离。
+## V0.25 用户数据迁移工具
+
+用途：
+- 把旧版服务器全局数据 `/app/data/personal-hub-data.json` 迁移到指定登录账号。
+- 适合从“单用户全局数据”升级到“注册账号、多用户隔离数据”时使用。
+
+入口：
+- 登录管理员账号。
+- 打开网站设置面板。
+- 点击“账号与多用户 / 用户管理”。
+- 在目标用户行点击“迁移旧数据”。
+
+迁移规则：
+- 来源文件：`/app/data/personal-hub-data.json`。
+- 目标文件：`/app/data/users/user-用户ID.json`。
+- 迁移会覆盖目标用户现有服务器数据。
+- 点击按钮前会弹出确认提示，建议先导出或备份数据。
+- 迁移完成后，该用户登录时会自动读取自己的服务器数据文件。
+
+VPS 上确认数据文件：
+```bash
+cd /opt/personal-hub/New-project
+docker compose exec personal-hub ls -lah /app/data
+docker compose exec personal-hub ls -lah /app/data/users
+```
+
+建议操作顺序：
+1. 先执行一次手动备份。
+2. 管理员登录网站。
+3. 打开用户管理。
+4. 给目标账号执行“迁移旧数据”。
+5. 退出管理员账号，登录目标账号确认数据是否正确。

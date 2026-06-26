@@ -358,22 +358,40 @@ const authSnippets = [
   "DatabaseSync",
   "/api/auth/session",
   "/api/auth/login",
+  "/api/auth/register",
+  "/api/auth/users",
   "/api/auth/logout",
   "PERSONAL_HUB_AUTH_DB_FILE",
   "PERSONAL_HUB_ADMIN_USERNAME",
   "PERSONAL_HUB_ADMIN_PASSWORD",
   "PERSONAL_HUB_SESSION_MAX_AGE",
+  "PERSONAL_HUB_REGISTRATION_ENABLED",
+  "PERSONAL_HUB_REGISTRATION_CODE",
   "personal_hub_session",
   "checkServerSession",
   "loginServer",
+  "registerServer",
+  "listServerUsers",
+  "updateServerUserStatus",
+  "resetServerUserPassword",
+  "migrateServerUserData",
+  "data-user-migrate-legacy",
+  "legacyData",
   "logoutServer",
   "serverConfigured",
+  "registrationEnabled",
+  "auth-mode-switch",
+  "userDataFilePath",
+  "openUserManagement",
+  "user-management-modal",
 ];
 const missingAuthSnippets = authSnippets.filter(
   (snippet) =>
     !authService.includes(snippet) &&
     !devServer.includes(snippet) &&
     !compose.includes(snippet) &&
+    !html.includes(snippet) &&
+    !persistentDataService.includes(snippet) &&
     !serverSyncDoc.includes(snippet) &&
     !readFileSync("src/core/server-auth.js", "utf8").includes(snippet) &&
     !events.includes(snippet) &&

@@ -17,6 +17,7 @@ import {
   saveServerSyncAutoEnabled,
   summarizeHubData,
 } from "./server-sync.js";
+import { listServerUsers, migrateServerUserData, resetServerUserPassword, updateServerUserStatus } from "./server-auth.js";
 
 function createDefaultFilters() {
   return {
@@ -353,6 +354,133 @@ export function bindEvents(app, elements, renderer, formController, authControll
       document.body.appendChild(dialog);
       dialog.showModal();
     });
+  }
+
+  async function showUserManagementDialog() {
+    const dialog = document.createElement("dialog");
+    dialog.className = "modal user-management-modal";
+    dialog.innerHTML = `
+      <div class="modal-panel user-management-panel">
+        <div class="drawer-head">
+          <div>
+            <span class="eyebrow">USERS</span>
+            <h2>用户管理</h2>
+          </div>
+          <button class="icon-button" data-user-management-close type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="user-management-body">
+          <p class="panel-copy">正在读取用户列表...</p>
+        </div>
+      </div>
+    `;
+
+    async function renderUsers() {
+      const body = dialog.querySelector(".user-management-body");
+      try {
+        const result = await listServerUsers();
+        const users = result.users || [];
+        const legacyData = result.legacyData || {};
+        const legacyBytes = Number(legacyData.dataBytes || 0);
+        const legacySize = legacyBytes >= 1024 ? `${(legacyBytes / 1024).toFixed(1)} KB` : `${legacyBytes} B`;
+        body.innerHTML = `
+          <div class="user-management-summary">
+            <article><span>用户总数</span><strong>${users.length}</strong></article>
+            <article><span>管理员</span><strong>${users.filter((user) => user.role === "admin").length}</strong></article>
+            <article><span>已禁用</span><strong>${users.filter((user) => user.disabled).length}</strong></article>
+          </div>
+          <div class="user-migration-panel ${legacyData.hasData ? "" : "is-empty"}">
+            <div>
+              <strong>旧全局数据迁移</strong>
+              <span>${legacyData.hasData ? `发现旧数据文件，可迁移给指定用户 · ${legacySize}` : "未发现旧全局数据文件"}</span>
+            </div>
+            <em>${escapeHtml(legacyData.hasData ? legacyData.dataFile || "" : "迁移会覆盖目标用户现有服务器数据，请先导出备份。")}</em>
+          </div>
+          <div class="user-management-list">
+            ${users
+              .map(
+                (user) => `
+                  <article class="user-management-row ${user.disabled ? "is-disabled" : ""}">
+                    <div>
+                      <strong>${escapeHtml(user.username)}${user.isCurrent ? "（当前）" : ""}</strong>
+                      <span>${escapeHtml(user.role)} · ${user.disabled ? "已禁用" : "正常"} · ${user.data?.hasData ? "已有数据" : "暂无数据"}</span>
+                      <em>${escapeHtml(user.data?.legacy ? "正在兼容旧全局数据" : user.data?.dataFile || "")}</em>
+                    </div>
+                    <div class="user-management-actions">
+                      <button class="ghost-button" data-user-migrate-legacy="${user.id}" ${legacyData.hasData ? "" : "disabled"} type="button">迁移旧数据</button>
+                      <button class="ghost-button" data-user-reset-password="${user.id}" type="button">重置密码</button>
+                      <button class="ghost-button ${user.disabled ? "" : "danger-button"}" data-user-toggle-status="${user.id}" data-user-disabled="${user.disabled ? "false" : "true"}" ${user.isCurrent ? "disabled" : ""} type="button">
+                        ${user.disabled ? "启用" : "禁用"}
+                      </button>
+                    </div>
+                  </article>
+                `,
+              )
+              .join("")}
+          </div>
+          <div class="modal-actions">
+            <button class="ghost-button" data-user-management-close type="button">关闭</button>
+          </div>
+        `;
+      } catch (error) {
+        body.innerHTML = `<p class="panel-copy">${escapeHtml(error.message || "用户列表读取失败。")}</p>`;
+      }
+    }
+
+    dialog.addEventListener("click", async (event) => {
+      if (event.target === dialog || event.target.closest("[data-user-management-close]")) {
+        dialog.close();
+        dialog.remove();
+        return;
+      }
+      const statusButton = event.target.closest("[data-user-toggle-status]");
+      if (statusButton) {
+        const disabled = statusButton.dataset.userDisabled === "true";
+        const confirmed = window.confirm(disabled ? "确定禁用这个用户吗？该用户会被强制退出。" : "确定启用这个用户吗？");
+        if (!confirmed) return;
+        try {
+          await updateServerUserStatus(statusButton.dataset.userToggleStatus, disabled);
+          await renderUsers();
+        } catch (error) {
+          window.alert(error.message);
+        }
+        return;
+      }
+      const migrateButton = event.target.closest("[data-user-migrate-legacy]");
+      if (migrateButton) {
+        const confirmed = window.confirm("确定把旧全局数据迁移到这个用户吗？如果该用户已有服务器数据，将会被旧数据覆盖。建议先导出备份。");
+        if (!confirmed) return;
+        try {
+          await migrateServerUserData(migrateButton.dataset.userMigrateLegacy, { source: "legacy", overwrite: true });
+          window.alert("旧数据已迁移到指定用户。");
+          await renderUsers();
+        } catch (error) {
+          window.alert(error.message);
+        }
+        return;
+      }
+      const resetButton = event.target.closest("[data-user-reset-password]");
+      if (resetButton) {
+        const password = window.prompt("请输入新密码，至少 8 位：");
+        if (!password) return;
+        try {
+          await resetServerUserPassword(resetButton.dataset.userResetPassword, password);
+          window.alert("密码已重置，该用户需要重新登录。");
+          await renderUsers();
+        } catch (error) {
+          window.alert(error.message);
+        }
+      }
+    });
+
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      dialog.close();
+      dialog.remove();
+    });
+
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    await renderUsers();
   }
 
   function normalizeInlineFilter(value) {
@@ -805,6 +933,12 @@ export function bindEvents(app, elements, renderer, formController, authControll
       } catch (error) {
         window.alert(error.message);
       }
+      return;
+    }
+
+    if (event.target.id === "openUserManagement") {
+      if (!(await ensureAuth())) return;
+      await showUserManagementDialog();
       return;
     }
 

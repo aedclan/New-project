@@ -291,13 +291,17 @@
       <form method="dialog" class="modal-panel compact-modal" id="authForm">
         <div class="drawer-head">
           <div>
-            <p class="eyebrow">Login</p>
-            <h2>登录后可编辑</h2>
+            <p class="eyebrow" id="authEyebrow">登录</p>
+            <h2 id="authTitle">账号访问</h2>
           </div>
           <button class="icon-button" value="cancel" type="submit" formnovalidate aria-label="关闭">&times;</button>
         </div>
 
         <div class="modal-scroll">
+          <div class="auth-mode-switch" id="authModeSwitch">
+            <button class="is-active" data-auth-mode="login" type="button">登录</button>
+            <button data-auth-mode="register" type="button">注册</button>
+          </div>
           <label>
             账号
             <input name="username" autocomplete="username" required placeholder="admin" />
@@ -306,16 +310,23 @@
             密码
             <input name="password" type="password" autocomplete="current-password" required placeholder="hub2026" />
           </label>
-          <p class="hint">本地原型账号：`admin / hub2026`。正式版会升级为真实登录系统。</p>
+          <label class="auth-register-field" hidden>
+            确认密码
+            <input name="confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入密码" />
+          </label>
+          <label class="auth-register-field" hidden>
+            注册码
+            <input name="registrationCode" autocomplete="off" placeholder="可选的邀请码" />
+          </label>
+          <p class="hint">使用服务器账号登录后，可编辑并跨设备同步数据。</p>
         </div>
 
         <div class="modal-actions">
           <button class="ghost-button" value="cancel" type="submit" formnovalidate>取消</button>
-          <button class="primary-button" value="default" type="submit">登录</button>
+          <button class="primary-button" value="default" id="authSubmitButton" type="submit">登录</button>
         </div>
       </form>
     </dialog>
-
     <dialog class="modal" id="contactDetailModal">
       <div class="modal-panel contact-detail-modal">
         <div class="drawer-head">

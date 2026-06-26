@@ -27,10 +27,58 @@ export async function loginServer(username, password) {
   return readJsonResponse(response);
 }
 
+export async function registerServer(username, password, confirmPassword, registrationCode) {
+  const response = await fetch("/api/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ username, password, confirmPassword, registrationCode }),
+  });
+  return readJsonResponse(response);
+}
+
 export async function logoutServer() {
   const response = await fetch("/api/auth/logout", {
     method: "POST",
     credentials: "same-origin",
+  });
+  return readJsonResponse(response);
+}
+
+export async function listServerUsers() {
+  const response = await fetch("/api/auth/users", {
+    headers: { Accept: "application/json" },
+    credentials: "same-origin",
+  });
+  return readJsonResponse(response);
+}
+
+export async function updateServerUserStatus(userId, disabled) {
+  const response = await fetch(`/api/auth/users/${encodeURIComponent(userId)}/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ disabled }),
+  });
+  return readJsonResponse(response);
+}
+
+export async function resetServerUserPassword(userId, password) {
+  const response = await fetch(`/api/auth/users/${encodeURIComponent(userId)}/password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ password }),
+  });
+  return readJsonResponse(response);
+}
+
+export async function migrateServerUserData(userId, options = {}) {
+  const response = await fetch(`/api/auth/users/${encodeURIComponent(userId)}/migrate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(options),
   });
   return readJsonResponse(response);
 }
