@@ -3,6 +3,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
 import { handleAuthRequest } from "./auth-service.mjs";
 import { handlePersistentDataRequest } from "./persistent-data-service.mjs";
+import { startScheduledBackups } from "./scheduled-backup-service.mjs";
 import { sendSubscriptionScanEmails, sendSubscriptionTestEmail } from "./subscription-email-service.mjs";
 
 const root = resolve(process.cwd());
@@ -114,5 +115,6 @@ function serveStaticFile(request, response) {
 
 server.listen(port, host, () => {
   console.log(`Personal Content Hub is running at http://${host}:${port}`);
+  startScheduledBackups();
 });
 

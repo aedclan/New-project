@@ -1,34 +1,95 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, extname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
-const dataFilePath = resolve(process.env.PERSONAL_HUB_DATA_FILE || "/app/data/personal-hub-data.json");
-const backupDir = resolve(process.env.PERSONAL_HUB_BACKUP_DIR || "/app/data/backups");
-const keepCount = Math.max(1, Number(process.env.PERSONAL_HUB_BACKUP_KEEP || 14));
+const defaultTargets = [
+  {
+    envKey: "PERSONAL_HUB_DATA_FILE",
+    fallback: "/app/data/personal-hub-data.json",
+    label: "data",
+  },
+  {
+    envKey: "PERSONAL_HUB_AUTH_DB_FILE",
+    fallback: "/app/data/personal-hub.sqlite",
+    label: "auth",
+  },
+];
 
 function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-if (!existsSync(dataFilePath)) {
-  console.error(`Data file does not exist: ${dataFilePath}`);
-  process.exit(1);
+function getBackupDir() {
+  return resolve(process.env.PERSONAL_HUB_BACKUP_DIR || "/app/data/backups");
 }
 
-mkdirSync(backupDir, { recursive: true });
+function getKeepCount() {
+  return Math.max(1, Number(process.env.PERSONAL_HUB_BACKUP_KEEP || 14));
+}
 
-const backupName = `${basename(dataFilePath, ".json")}-${timestamp()}.json`;
-const backupPath = join(backupDir, backupName);
-copyFileSync(dataFilePath, backupPath);
+function buildBackupName(filePath, label, createdAt) {
+  const extension = extname(filePath) || ".bak";
+  const baseName = basename(filePath, extension);
+  const suffix = baseName.toLowerCase().includes(label.toLowerCase()) ? "" : `-${label}`;
+  return `${baseName}${suffix}-${createdAt}${extension}`;
+}
 
-const backups = readdirSync(backupDir)
-  .filter((file) => file.endsWith(".json"))
-  .map((file) => {
-    const filePath = join(backupDir, file);
-    return { filePath, mtimeMs: statSync(filePath).mtimeMs };
-  })
-  .sort((left, right) => right.mtimeMs - left.mtimeMs);
+function pruneBackups(backupDir, keepCount) {
+  const backups = readdirSync(backupDir)
+    .filter((file) => /\.(json|sqlite|db|bak)$/i.test(file))
+    .map((file) => {
+      const filePath = join(backupDir, file);
+      return { filePath, mtimeMs: statSync(filePath).mtimeMs };
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
 
-backups.slice(keepCount).forEach((item) => unlinkSync(item.filePath));
+  backups.slice(keepCount).forEach((item) => unlinkSync(item.filePath));
+  return Math.min(backups.length, keepCount);
+}
 
-console.log(`Backup created: ${backupPath}`);
-console.log(`Backups retained: ${Math.min(backups.length, keepCount)}`);
+export function createPersistentDataBackup(options = {}) {
+  const backupDir = getBackupDir();
+  const keepCount = getKeepCount();
+  const createdAt = timestamp();
+  const created = [];
+  const skipped = [];
+
+  mkdirSync(backupDir, { recursive: true });
+
+  defaultTargets.forEach((target) => {
+    const sourcePath = resolve(process.env[target.envKey] || target.fallback);
+    if (!existsSync(sourcePath)) {
+      skipped.push({ label: target.label, sourcePath, reason: "missing" });
+      return;
+    }
+
+    const backupName = buildBackupName(sourcePath, target.label, createdAt);
+    const backupPath = join(backupDir, backupName);
+    copyFileSync(sourcePath, backupPath);
+    created.push({ label: target.label, sourcePath, backupPath });
+  });
+
+  if (!created.length && !options.allowEmpty) {
+    throw new Error(`No backup targets exist. Checked: ${skipped.map((item) => item.sourcePath).join(", ")}`);
+  }
+
+  return {
+    backupDir,
+    keepCount,
+    retained: pruneBackups(backupDir, keepCount),
+    created,
+    skipped,
+  };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  try {
+    const result = createPersistentDataBackup();
+    result.created.forEach((item) => console.log(`Backup created: ${item.backupPath}`));
+    result.skipped.forEach((item) => console.log(`Backup skipped: ${item.sourcePath} (${item.reason})`));
+    console.log(`Backups retained: ${result.retained}`);
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+}

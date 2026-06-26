@@ -43,6 +43,9 @@ nano .env
 ```env
 PERSONAL_HUB_SYNC_TOKEN=请换成一串足够长的随机密码
 PERSONAL_HUB_BACKUP_KEEP=14
+PERSONAL_HUB_BACKUP_AUTO_ENABLED=true
+PERSONAL_HUB_BACKUP_INTERVAL_HOURS=24
+PERSONAL_HUB_BACKUP_ON_START=false
 PERSONAL_HUB_ADMIN_USERNAME=admin
 PERSONAL_HUB_ADMIN_PASSWORD=请换成一个强密码
 PERSONAL_HUB_SESSION_MAX_AGE=604800
@@ -55,6 +58,9 @@ PERSONAL_HUB_SESSION_MAX_AGE=604800
 ```env
 PERSONAL_HUB_SYNC_TOKEN=8Yk3mA9sQx2026ChangeThisLongToken
 PERSONAL_HUB_BACKUP_KEEP=14
+PERSONAL_HUB_BACKUP_AUTO_ENABLED=true
+PERSONAL_HUB_BACKUP_INTERVAL_HOURS=24
+PERSONAL_HUB_BACKUP_ON_START=false
 PERSONAL_HUB_ADMIN_USERNAME=admin
 PERSONAL_HUB_ADMIN_PASSWORD=ChangeThisAdminPassword2026
 PERSONAL_HUB_SESSION_MAX_AGE=604800
@@ -183,7 +189,58 @@ docker compose up -d --build
 - 自动保存不会自动从服务器读取数据。
 - 从服务器读取数据仍然需要手动点击，避免服务器旧数据误覆盖当前浏览器数据。
 
-## 5. 手动备份服务器数据
+## 5. 备份服务器数据
+
+当前备份会同时处理：
+
+- `/app/data/personal-hub-data.json`：整站业务数据快照。
+- `/app/data/personal-hub.sqlite`：真实登录账号与会话数据库。
+
+### 自动定时备份
+
+Docker 容器启动后，会根据 `.env` 自动开启定时备份。
+
+推荐配置：
+
+```env
+PERSONAL_HUB_BACKUP_AUTO_ENABLED=true
+PERSONAL_HUB_BACKUP_INTERVAL_HOURS=24
+PERSONAL_HUB_BACKUP_ON_START=false
+PERSONAL_HUB_BACKUP_KEEP=14
+```
+
+含义：
+
+- `PERSONAL_HUB_BACKUP_AUTO_ENABLED=true`：开启自动备份。
+- `PERSONAL_HUB_BACKUP_INTERVAL_HOURS=24`：每 24 小时备份一次。
+- `PERSONAL_HUB_BACKUP_ON_START=false`：容器启动时不立即备份，只按周期备份。
+- `PERSONAL_HUB_BACKUP_KEEP=14`：保留最近 14 个备份文件。
+
+如果你希望每次重启容器都先备份一次，可以改成：
+
+```env
+PERSONAL_HUB_BACKUP_ON_START=true
+```
+
+修改 `.env` 后重建容器：
+
+```bash
+docker compose up -d --build
+```
+
+查看自动备份是否启动：
+
+```bash
+docker compose logs -f --tail=80
+```
+
+看到类似下面的内容，说明自动备份已启动：
+
+```text
+Personal Hub automatic backups scheduled every 24 hour(s).
+```
+
+### 手动备份
 
 进入 VPS 项目目录：
 
@@ -231,7 +288,7 @@ docker compose up -d --build
 docker compose exec personal-hub ls -lah /app/data/backups
 ```
 
-选择要恢复的文件，例如：
+选择要恢复的业务数据文件，例如：
 
 ```text
 personal-hub-data-2026-06-26T10-20-30-000Z.json
@@ -244,6 +301,20 @@ docker compose exec personal-hub sh -c 'cp /app/data/backups/personal-hub-data-2
 ```
 
 然后打开网站，在设置页点击“从服务器读取”，把恢复后的服务器数据同步回浏览器。
+
+如果要恢复登录数据库，选择 `.sqlite` 文件，例如：
+
+```text
+personal-hub-auth-2026-06-26T10-20-30-000Z.sqlite
+```
+
+先停止容器，再覆盖数据库，最后重启：
+
+```bash
+docker compose down
+docker compose run --rm --entrypoint sh personal-hub -c 'cp /app/data/backups/personal-hub-auth-2026-06-26T10-20-30-000Z.sqlite /app/data/personal-hub.sqlite'
+docker compose up -d
+```
 
 ## 7. 当前阶段的边界
 
@@ -258,17 +329,17 @@ docker compose exec personal-hub sh -c 'cp /app/data/backups/personal-hub-data-2
 - HttpOnly Cookie 会话。
 - 可选自动保存到服务器。
 - 本地与服务器数据合并入口。
+- 合并前冲突详情弹窗。
+- 自动定时备份任务。
 
 尚未完成：
 
 - 业务数据拆分进 SQLite 表。
-- 自动定时备份。
 - 多用户隔离。
 
 下一轮建议继续做：
 
 1. SQLite 数据表设计。
-2. 真实登录接口。
-3. 登录后自动从服务器读取数据。
-4. 保存数据时自动写入服务器。
-5. 定时备份任务。
+2. 登录后自动从服务器读取数据。
+3. 保存数据时自动写入服务器。
+4. 多用户隔离。
