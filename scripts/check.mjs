@@ -25,6 +25,8 @@ const textFiles = [
   "index.html",
   "styles.css",
   "package.json",
+  "src/config/version.js",
+  ...readdirSync(".").filter((file) => file.endsWith(".md")),
 ];
 
 for (const file of files) {
@@ -45,9 +47,15 @@ const requiredFiles = [
   "src/core/store.js",
   "src/core/bill-excel-controller.js",
   "src/core/subscription-notifications.js",
+  "src/core/server-sync.js",
+  "src/core/auto-server-sync.js",
   "src/vendor/xlsx.full.min.js",
   "src/views/renderer.js",
+  "scripts/persistent-data-service.mjs",
+  "scripts/backup-persistent-data.mjs",
+  "scripts/auth-service.mjs",
   "EMAIL_NOTIFICATION_SETUP.md",
+  "SERVER_SYNC_AND_BACKUP.md",
 ];
 const missing = requiredFiles.filter((file) => !existsSync(file));
 
@@ -57,10 +65,26 @@ if (missing.length > 0) {
 }
 
 const html = readFileSync("index.html", "utf8");
+const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+const packageText = readFileSync("package.json", "utf8");
+const versionFile = readFileSync("src/config/version.js", "utf8");
+const versionMatch = versionFile.match(/APP_VERSION\s*=\s*"([^"]+)"/);
+if (!versionMatch) {
+  console.error("src/config/version.js is missing APP_VERSION.");
+  process.exit(1);
+}
+if (packageJson.version !== versionMatch[1]) {
+  console.error(`Version mismatch: package.json has ${packageJson.version}, APP_VERSION has ${versionMatch[1]}.`);
+  process.exit(1);
+}
+
 const requiredSnippets = [
   '<link rel="stylesheet" href="styles.css" />',
   '<script type="module" src="src/main.js"></script>',
   '<nav class="nav-list" id="navList"></nav>',
+  '<div class="app-version-badge" id="appVersionBadge">',
+  '<title>个人工作台</title>',
+  'placeholder="搜索事项、账单、笔记、项目集..."',
 ];
 
 const missingSnippets = requiredSnippets.filter((snippet) => !html.includes(snippet));
@@ -69,10 +93,40 @@ if (missingSnippets.length > 0) {
   process.exit(1);
 }
 
+const removedStartupSnippets = [
+  "startupNotice",
+  "startup-notice",
+  "页面尚未完成初始化",
+  "不要直接双击",
+];
+const remainingStartupSnippets = removedStartupSnippets.filter((snippet) => html.includes(snippet));
+if (remainingStartupSnippets.length > 0) {
+  console.error(`Startup overlay residue detected in index.html:\n${remainingStartupSnippets.join("\n")}`);
+  process.exit(1);
+}
+
 const renderer = readFileSync("src/views/renderer.js", "utf8");
+const constants = readFileSync("src/config/constants.js", "utf8");
+const serverSync = readFileSync("src/core/server-sync.js", "utf8");
+const autoServerSync = readFileSync("src/core/auto-server-sync.js", "utf8");
+const devServer = readFileSync("scripts/dev-server.mjs", "utf8");
+const persistentDataService = readFileSync("scripts/persistent-data-service.mjs", "utf8");
+const backupDataScript = readFileSync("scripts/backup-persistent-data.mjs", "utf8");
+const authService = readFileSync("scripts/auth-service.mjs", "utf8");
+const compose = readFileSync("docker-compose.yml", "utf8");
+const serverSyncDoc = readFileSync("SERVER_SYNC_AND_BACKUP.md", "utf8");
 const requiredRendererSnippets = [
   "function renderDashboard",
   "function renderBills",
+  "function billScopeOverviewPanel",
+  "function billImportReviewPanel",
+  "function payerBalancePanel",
+  "function mortgageDetailList",
+  "bill-source",
+  "bill-payer",
+  "bill-fixed",
+  "账单明细",
+  "导入后复核",
   "function renderSubscriptions",
   "function renderFavors",
   "function renderNotes",
@@ -80,6 +134,9 @@ const requiredRendererSnippets = [
   "downloadBillExcelTemplate",
   "exportFinanceExcel",
   "importBillExcelButton",
+  "financeImportSource",
+  "financeImportPayer",
+  "本次导入来源",
   "bookmarkForm",
   "外部资料收藏",
   "kanban-board",
@@ -91,6 +148,10 @@ const requiredRendererSnippets = [
   "relationshipLedgerRow",
   "isOverdue",
   "bills: () => renderBills",
+  "月度与累计对照",
+  "承担结构",
+  "房贷明细",
+  "最大固定项",
 ];
 const missingRendererSnippets = requiredRendererSnippets.filter((snippet) => !renderer.includes(snippet));
 if (missingRendererSnippets.length > 0) {
@@ -106,6 +167,15 @@ const requiredExcelSnippets = [
   "importFile",
   "exportFinanceWorkbook",
   "downloadTemplate",
+  "defaultSource",
+  "shouldSkipBillRow",
+  "buildBillTitle",
+  "交易关闭",
+  "支付失败",
+  "summarizeImportedBills",
+  "summarizeBillMonths",
+  "summarizeImportOptions",
+  "失败 / 跳过明细",
   "订阅项目",
   "SUBSCRIPTION_HEADERS",
 ];
@@ -182,9 +252,17 @@ const subscriptionEnhancementSnippets = [
   "subscription-stats-grid",
   "subscription-due-panel",
   "subscription-due-list",
+  "ownerTotals",
+  "paymentTotals",
+  "manualRenewing",
+  "subscription-maturity-panel",
+  "subscription-distribution-grid",
+  "subscriptionDistributionRows",
+  "paymentMethod",
+  "owner",
 ];
 const missingSubscriptionEnhancements = subscriptionEnhancementSnippets.filter(
-  (snippet) => !store.includes(snippet) && !events.includes(snippet) && !renderer.includes(snippet) && !styles.includes(snippet) && !readFileSync("scripts/dev-server.mjs", "utf8").includes(snippet),
+  (snippet) => !store.includes(snippet) && !events.includes(snippet) && !renderer.includes(snippet) && !styles.includes(snippet) && !devServer.includes(snippet),
 );
 if (missingSubscriptionEnhancements.length > 0) {
   console.error(`Subscription enhancements are missing:\n${missingSubscriptionEnhancements.join("\n")}`);
@@ -209,6 +287,94 @@ if (renderer.includes('renderControls(elements, data, ui, "subscriptions")')) {
   console.error("Subscriptions page should not render the toolbar controls.");
   process.exit(1);
 }
+
+const serverSyncSnippets = [
+  "SERVER_SYNC_TOKEN_KEY",
+  "loadServerSyncState",
+  "checkServerSyncStatus",
+  "pushServerData",
+  "pullServerData",
+  "server-sync-panel",
+  "serverSyncToken",
+  "checkServerSyncStatus",
+  "pushServerData",
+  "pullServerData",
+  "handlePersistentDataRequest",
+  "/api/data/status",
+  "/api/data",
+  "PERSONAL_HUB_SYNC_TOKEN",
+  "PERSONAL_HUB_DATA_FILE",
+  "PERSONAL_HUB_BACKUP_DIR",
+  "PERSONAL_HUB_BACKUP_KEEP",
+  "personal-hub-data:/app/data",
+  "personal-hub-data:",
+  "importData(payload)",
+  "backup:data",
+  "SERVER_SYNC_AUTO_KEY",
+  "SERVER_SYNC_LAST_PUSH_KEY",
+  "saveServerSyncAutoEnabled",
+  "createAutoServerSync",
+  "autoServerSync",
+  "serverSyncAutoEnabled",
+  "server-sync-auto-toggle",
+  "mergeHubData",
+  "summarizeHubData",
+  "formatHubDataSummary",
+  "mergeServerData",
+  "合并服务器数据",
+];
+const missingServerSyncSnippets = serverSyncSnippets.filter(
+  (snippet) =>
+    !constants.includes(snippet) &&
+    !serverSync.includes(snippet) &&
+    !autoServerSync.includes(snippet) &&
+    !events.includes(snippet) &&
+    !renderer.includes(snippet) &&
+    !styles.includes(snippet) &&
+    !store.includes(snippet) &&
+    !devServer.includes(snippet) &&
+    !persistentDataService.includes(snippet) &&
+    !backupDataScript.includes(snippet) &&
+    !authService.includes(snippet) &&
+    !compose.includes(snippet) &&
+    !packageText.includes(snippet) &&
+    !serverSyncDoc.includes(snippet),
+);
+if (missingServerSyncSnippets.length > 0) {
+  console.error(`Server sync hooks are missing:\n${missingServerSyncSnippets.join("\n")}`);
+  process.exit(1);
+}
+
+const authSnippets = [
+  "node:sqlite",
+  "DatabaseSync",
+  "/api/auth/session",
+  "/api/auth/login",
+  "/api/auth/logout",
+  "PERSONAL_HUB_AUTH_DB_FILE",
+  "PERSONAL_HUB_ADMIN_USERNAME",
+  "PERSONAL_HUB_ADMIN_PASSWORD",
+  "PERSONAL_HUB_SESSION_MAX_AGE",
+  "personal_hub_session",
+  "checkServerSession",
+  "loginServer",
+  "logoutServer",
+  "serverConfigured",
+];
+const missingAuthSnippets = authSnippets.filter(
+  (snippet) =>
+    !authService.includes(snippet) &&
+    !devServer.includes(snippet) &&
+    !compose.includes(snippet) &&
+    !serverSyncDoc.includes(snippet) &&
+    !readFileSync("src/core/server-auth.js", "utf8").includes(snippet) &&
+    !events.includes(snippet) &&
+    !readFileSync("src/core/auth.js", "utf8").includes(snippet),
+);
+if (missingAuthSnippets.length > 0) {
+  console.error(`Server auth hooks are missing:\n${missingAuthSnippets.join("\n")}`);
+  process.exit(1);
+}
 const missingBookmarkSnippets = bookmarkSnippets.filter(
   (snippet) => !store.includes(snippet) && !events.includes(snippet) && !renderer.includes(snippet) && !html.includes(snippet),
 );
@@ -219,20 +385,27 @@ if (missingBookmarkSnippets.length > 0) {
 
 const mojibakeSamples = [
   "\uFFFD",
-  "\u934F",
-  "\u93C0\u60F0\u68CC",
-  "\u7ED7\u65C7\uE187",
-  "\u940F\u57AB\u5285",
-  "\u95BE\u70AC\u5E34",
-  "\u7F03\uE1C0\u300A",
-  "\u5BB8\u63D2\u756C\u93B4",
-  "\u5BF0\u546D\uE629\u941E",
-  "\u6769\u6D9C\uE511\u6D93",
+  "涓",
+  "涓诲",
+  "鎼滅储",
+  "鐧诲",
+  "鏂板",
+  "璐﹀",
+  "绫诲",
+  "鎬昏",
+  "椤圭",
+  "鍏抽",
+  "寰呭",
+  "杩涜",
+  "宸插",
+  "鏀",
+  "鏀跺",
+  "瀵煎",
+  "€?",
 ];
-const suspiciousTextPatterns = mojibakeSamples.map((sample) => new RegExp(sample));
 for (const file of textFiles) {
   const content = readFileSync(file, "utf8");
-  if (suspiciousTextPatterns.some((pattern) => pattern.test(content))) {
+  if (mojibakeSamples.some((sample) => content.includes(sample))) {
     console.error(`Potential mojibake detected in ${file}`);
     process.exit(1);
   }

@@ -7,6 +7,16 @@ import {
   runBrowserSubscriptionNotifications,
   saveSubscriptionNotificationSettings,
 } from "./subscription-notifications.js";
+import {
+  buildHubDataMergeReport,
+  checkServerSyncStatus,
+  formatHubDataSummary,
+  mergeHubData,
+  pullServerData,
+  pushServerData,
+  saveServerSyncAutoEnabled,
+  summarizeHubData,
+} from "./server-sync.js";
 
 function createDefaultFilters() {
   return {
@@ -219,6 +229,132 @@ export function initializeTheme() {
 export function bindEvents(app, elements, renderer, formController, authController, billExcelController) {
   createDatePicker();
 
+  async function ensureAuth() {
+    if (authController.ensureAuth) return authController.ensureAuth();
+    return authController.requireAuth();
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function renderPreviewList(items = []) {
+    if (!items.length) return `<span class="merge-preview-empty">无</span>`;
+    return items.map((item) => `<span>${escapeHtml(item)}</span>`).join("");
+  }
+
+  function showMergePreviewDialog(report, summaries) {
+    return new Promise((resolve) => {
+      const dialog = document.createElement("dialog");
+      dialog.className = "modal merge-preview-modal";
+      const rows = report.collections
+        .map(
+          (item) => `
+            <article class="merge-preview-row">
+              <div class="merge-preview-row__head">
+                <strong>${escapeHtml(item.label)}</strong>
+                <span>本地 ${item.localCount} / 服务器 ${item.serverCount}</span>
+              </div>
+              <div class="merge-preview-metrics">
+                <span><b>${item.localOnlyCount}</b> 本地新增</span>
+                <span><b>${item.serverOnlyCount}</b> 服务器新增</span>
+                <span class="${item.conflictCount ? "is-warning" : ""}"><b>${item.conflictCount}</b> 冲突</span>
+                <span><b>${item.sameCount}</b> 相同</span>
+              </div>
+              ${
+                item.localOnlyCount || item.serverOnlyCount || item.conflictCount
+                  ? `
+                    <div class="merge-preview-detail-grid">
+                      <div>
+                        <em>本地独有</em>
+                        <div class="merge-preview-tags">${renderPreviewList(item.localOnlyPreview)}</div>
+                      </div>
+                      <div>
+                        <em>服务器独有</em>
+                        <div class="merge-preview-tags">${renderPreviewList(item.serverOnlyPreview)}</div>
+                      </div>
+                    </div>
+                  `
+                  : ""
+              }
+              ${
+                item.conflicts.length
+                  ? `
+                    <div class="merge-conflict-list">
+                      ${item.conflicts
+                        .map(
+                          (conflict) => `
+                            <div>
+                              <strong>${escapeHtml(conflict.title)}</strong>
+                              <span>保留${conflict.winner === "local" ? "本地" : "服务器"}较新版本</span>
+                            </div>
+                          `,
+                        )
+                        .join("")}
+                    </div>
+                  `
+                  : ""
+              }
+            </article>
+          `,
+        )
+        .join("");
+
+      dialog.innerHTML = `
+        <div class="modal-panel merge-preview-panel">
+          <div class="drawer-head">
+            <div>
+              <span class="eyebrow">SERVER MERGE</span>
+              <h2>合并前数据对照</h2>
+            </div>
+            <button class="icon-button" data-merge-preview-cancel type="button" aria-label="关闭">×</button>
+          </div>
+          <div class="merge-preview-summary">
+            <article><span>本地独有</span><strong>${report.totals.localOnlyCount}</strong></article>
+            <article><span>服务器独有</span><strong>${report.totals.serverOnlyCount}</strong></article>
+            <article><span>冲突记录</span><strong>${report.totals.conflictCount}</strong></article>
+            <article><span>相同记录</span><strong>${report.totals.sameCount}</strong></article>
+          </div>
+          <div class="merge-preview-compare">
+            <p><strong>当前浏览器</strong>${escapeHtml(summaries.localSummary)}</p>
+            <p><strong>服务器</strong>${escapeHtml(summaries.serverSummary)}</p>
+            <p><strong>合并后</strong>${escapeHtml(summaries.mergedSummary)}</p>
+          </div>
+          <div class="merge-preview-list">${rows}</div>
+          <div class="modal-actions">
+            <button class="ghost-button" data-merge-preview-cancel type="button">取消</button>
+            <button class="primary-button" data-merge-preview-confirm type="button">确认合并</button>
+          </div>
+        </div>
+      `;
+
+      function close(confirmed) {
+        dialog.close();
+        dialog.remove();
+        resolve(confirmed);
+      }
+
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog || event.target.closest("[data-merge-preview-cancel]")) {
+          close(false);
+          return;
+        }
+        if (event.target.closest("[data-merge-preview-confirm]")) close(true);
+      });
+      dialog.addEventListener("cancel", (event) => {
+        event.preventDefault();
+        close(false);
+      });
+      document.body.appendChild(dialog);
+      dialog.showModal();
+    });
+  }
+
   function normalizeInlineFilter(value) {
     return String(value || "").replace(/\s+/g, "").trim().toLowerCase();
   }
@@ -308,7 +444,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const editButton = event.target.closest("[data-edit]");
     if (editButton) {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const [type, id] = editButton.dataset.edit.split(":");
       const item = app.store.getEntry(type, id);
       if (item) {
@@ -320,7 +456,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const favorEditToggle = event.target.closest("[data-toggle-favor-edit]");
     if (favorEditToggle) {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const panel = [...document.querySelectorAll("[data-favor-edit-panel]")].find(
         (item) => item.dataset.favorEditPanel === favorEditToggle.dataset.toggleFavorEdit,
       );
@@ -333,7 +469,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const markReturnButton = event.target.closest("[data-mark-return]");
     if (markReturnButton) {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       app.store.markFavorReturned(markReturnButton.dataset.markReturn);
       renderer.render();
       return;
@@ -341,7 +477,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const deleteContactButton = event.target.closest("[data-delete-contact]");
     if (deleteContactButton) {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const result = app.store.deleteContact(deleteContactButton.dataset.deleteContact);
       if (!result?.ok) {
         window.alert(`这个人物还有 ${result?.relatedCount || 0} 条往来记录，不能直接删除。请先使用“人物合并”处理重复人物，或保留历史关系。`);
@@ -354,7 +490,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const completeButton = event.target.closest("[data-complete]");
     if (completeButton) {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       app.store.completeTask(completeButton.dataset.complete);
       renderer.closeDrawer();
       renderer.render();
@@ -410,6 +546,20 @@ export function bindEvents(app, elements, renderer, formController, authControll
       return;
     }
 
+    const financeSourceButton = event.target.closest("[data-finance-source]");
+    if (financeSourceButton) {
+      const source = financeSourceButton.dataset.financeSource;
+      const input = document.querySelector("#financeImportSource");
+      const label = document.querySelector("#financeImportSourceLabel");
+      if (input) input.value = source;
+      if (label) label.textContent = source;
+      document.querySelectorAll("[data-finance-source]").forEach((button) => button.classList.toggle("is-active", button === financeSourceButton));
+      const menuRoot = financeSourceButton.closest("[data-menu-root]");
+      menuRoot?.classList.remove("is-open");
+      menuRoot?.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
+      return;
+    }
+
     if (!event.target.closest("[data-menu-root]")) {
       document.querySelectorAll("[data-menu-root].is-open").forEach((menu) => {
         menu.classList.remove("is-open");
@@ -419,7 +569,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const subscriptionBillButton = event.target.closest("[data-subscription-bill]");
     if (subscriptionBillButton) {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const billId = app.store.createBillFromSubscription(subscriptionBillButton.dataset.subscriptionBill);
       if (!billId) {
         window.alert("生成账单失败，请确认订阅仍然存在。");
@@ -431,7 +581,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const subscriptionRenewButton = event.target.closest("[data-subscription-renew]");
     if (subscriptionRenewButton) {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const nextRenewalDate = app.store.renewSubscription(subscriptionRenewButton.dataset.subscriptionRenew);
       if (!nextRenewalDate) {
         window.alert("续费失败，请确认订阅仍然存在。");
@@ -444,7 +594,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const subscriptionStatusButton = event.target.closest("[data-subscription-status]");
     if (subscriptionStatusButton) {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const [subscriptionId, status] = subscriptionStatusButton.dataset.subscriptionStatus.split(":");
       const updated = app.store.updateSubscriptionStatus(subscriptionId, status);
       if (!updated) {
@@ -457,7 +607,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const subscriptionReviewButton = event.target.closest("[data-subscription-review]");
     if (subscriptionReviewButton) {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const nextReviewDate = app.store.reviewSubscription(subscriptionReviewButton.dataset.subscriptionReview);
       if (!nextReviewDate) {
         window.alert("复盘失败，请确认订阅仍然存在。");
@@ -470,7 +620,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const convertNoteButton = event.target.closest("[data-convert-note]");
     if (convertNoteButton) {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       app.store.createTaskFromNote(convertNoteButton.dataset.convertNote);
       renderer.closeDrawer();
       resetPageState(app, "tasks");
@@ -481,7 +631,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const deleteButton = event.target.closest("[data-delete]");
     if (deleteButton) {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const [type, id] = deleteButton.dataset.delete.split(":");
       const confirmed = window.confirm("确定要删除这条内容吗？此操作会立刻写入本地存储。");
       if (!confirmed) return;
@@ -492,7 +642,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     }
 
     if (event.target.id === "quickAddButton") {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       formController.openCreate();
       return;
     }
@@ -519,7 +669,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     }
 
     if (event.target.id === "exportData") {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const blob = new Blob([JSON.stringify(app.store.exportData(), null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -531,25 +681,25 @@ export function bindEvents(app, elements, renderer, formController, authControll
     }
 
     if (event.target.id === "downloadBillExcelTemplate") {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       billExcelController.downloadTemplate();
       return;
     }
 
     if (event.target.id === "exportFinanceExcel") {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       billExcelController.exportFinanceWorkbook();
       return;
     }
 
     if (event.target.id === "importBillExcelButton") {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       document.querySelector("#billExcelFile")?.click();
       return;
     }
 
     if (event.target.id === "resetDemo") {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const confirmed = window.confirm("确定要恢复示例数据吗？当前本地修改会被覆盖。");
       if (!confirmed) return;
       app.store.reset();
@@ -558,7 +708,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     }
 
     if (event.target.id === "clearData") {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const confirmed = window.confirm("确定要清空全部数据吗？事项、账单、订阅、人情往来、笔记、项目集和收藏都会被删除。");
       if (!confirmed) return;
       const doubleConfirmed = window.confirm("此操作无法撤销。建议先导出备份。仍要继续吗？");
@@ -570,7 +720,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     }
 
     if (event.target.id === "clearBillsData") {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const confirmed = window.confirm("确定只清空生活收支吗？订阅、人情往来、事项、笔记和收藏都会保留。建议先导出财务 Excel。");
       if (!confirmed) return;
       app.store.clearBillsData();
@@ -581,8 +731,85 @@ export function bindEvents(app, elements, renderer, formController, authControll
       return;
     }
 
+    if (event.target.id === "checkServerSyncStatus") {
+      if (!(await ensureAuth())) return;
+      try {
+        const result = await checkServerSyncStatus();
+        const configuredText = result.configured ? "已配置同步密钥" : "未配置同步密钥";
+        const dataText = result.hasData ? "服务器已有数据" : "服务器暂无数据";
+        window.alert(`${configuredText}，${dataText}。`);
+      } catch (error) {
+        window.alert(error.message);
+      }
+      return;
+    }
+
+    if (event.target.id === "pushServerData") {
+      if (!(await ensureAuth())) return;
+      const token = document.querySelector("#serverSyncToken")?.value || "";
+      const localSummary = formatHubDataSummary(summarizeHubData(app.store.exportData()));
+      const confirmed = window.confirm(`确定把当前浏览器数据保存到服务器吗？服务器上的旧数据会被覆盖。\n\n当前浏览器：${localSummary}`);
+      if (!confirmed) return;
+      try {
+        const result = await pushServerData(app.store.exportData(), token);
+        window.alert(`服务器数据已保存：${result.savedAt || "刚刚"}`);
+        renderer.render();
+      } catch (error) {
+        window.alert(error.message);
+      }
+      return;
+    }
+
+    if (event.target.id === "pullServerData") {
+      if (!(await ensureAuth())) return;
+      const token = document.querySelector("#serverSyncToken")?.value || "";
+      const localSummary = formatHubDataSummary(summarizeHubData(app.store.exportData()));
+      const confirmed = window.confirm(`确定从服务器读取数据并覆盖当前浏览器数据吗？建议先导出 JSON 备份。\n\n当前浏览器：${localSummary}`);
+      if (!confirmed) return;
+      try {
+        const result = await pullServerData(token);
+        if (!result.data) {
+          window.alert("服务器暂无可恢复的数据。");
+          return;
+        }
+        app.store.importData(result.data);
+        renderer.render();
+        window.alert(`已从服务器恢复数据：${result.savedAt || "未知时间"}`);
+      } catch (error) {
+        window.alert(error.message);
+      }
+      return;
+    }
+
+    if (event.target.id === "mergeServerData") {
+      if (!(await ensureAuth())) return;
+      const token = document.querySelector("#serverSyncToken")?.value || "";
+      try {
+        const result = await pullServerData(token);
+        if (!result.data) {
+          window.alert("服务器暂无可合并的数据。");
+          return;
+        }
+        const localData = app.store.exportData();
+        const mergedData = mergeHubData(localData, result.data);
+        const localSummary = formatHubDataSummary(summarizeHubData(localData));
+        const serverSummary = formatHubDataSummary(summarizeHubData(result.data));
+        const mergedSummary = formatHubDataSummary(summarizeHubData(mergedData));
+        const mergeReport = buildHubDataMergeReport(localData, result.data);
+        const confirmed = await showMergePreviewDialog(mergeReport, { localSummary, serverSummary, mergedSummary });
+        if (!confirmed) return;
+        app.store.importData(mergedData);
+        await pushServerData(mergedData, token);
+        renderer.render();
+        window.alert("服务器数据已合并。");
+      } catch (error) {
+        window.alert(error.message);
+      }
+      return;
+    }
+
     if (event.target.id === "requestBrowserNotification") {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const permission = await requestBrowserNotificationPermission();
       const enabled = permission === "granted";
       saveSubscriptionNotificationSettings({ ...loadSubscriptionNotificationSettings(), browserEnabled: enabled });
@@ -592,7 +819,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     }
 
     if (event.target.id === "testSubscriptionEmail") {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const settings = loadSubscriptionNotificationSettings();
       if (!settings.email) {
         window.alert("请先保存接收邮箱。");
@@ -608,7 +835,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     }
 
     if (event.target.id === "scanSubscriptionEmail") {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       const settings = loadSubscriptionNotificationSettings();
       const overview = app.store.getSubscriptionsOverview();
       const dueItems = getSubscriptionsDueForNotification(overview.items, settings);
@@ -629,7 +856,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     }
 
     if (event.target.id === "openNoteModal") {
-      if (!authController.requireAuth()) return;
+      if (!(await ensureAuth())) return;
       formController.openCreate("notes");
       return;
     }
@@ -644,12 +871,17 @@ export function bindEvents(app, elements, renderer, formController, authControll
     }
   });
 
-  document.addEventListener("change", (event) => {
+  document.addEventListener("change", async (event) => {
     let shouldRender = false;
 
     if (event.target.id === "billExcelFile") {
+      if (!(await ensureAuth())) {
+        event.target.value = "";
+        return;
+      }
       const [file] = event.target.files || [];
       billExcelController.importFile(file, {
+        defaultSource: document.querySelector("#financeImportSource")?.value || "自动识别",
         defaultPayer: document.querySelector("#financeImportPayer")?.value || "家庭账户",
       });
       event.target.value = "";
@@ -658,6 +890,18 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     if (event.target.id === "favoriteOnlyToggle") {
       app.ui.filters.favoriteOnly = event.target.checked;
+      shouldRender = true;
+    }
+
+    if (event.target.id === "serverSyncAutoEnabled") {
+      if (!(await ensureAuth())) {
+        event.target.checked = !event.target.checked;
+        return;
+      }
+      saveServerSyncAutoEnabled(event.target.checked);
+      if (event.target.checked) {
+        app.autoServerSync?.schedule(100);
+      }
       shouldRender = true;
     }
 
@@ -701,10 +945,10 @@ export function bindEvents(app, elements, renderer, formController, authControll
     renderer.render();
   });
 
-  elements.entryForm.addEventListener("submit", (event) => {
+  elements.entryForm.addEventListener("submit", async (event) => {
     if (event.submitter?.value === "cancel") return;
     event.preventDefault();
-    if (!authController.requireAuth()) return;
+    if (!(await ensureAuth())) return;
     const nextPage = app.store.upsertEntry(new FormData(elements.entryForm));
     resetPageState(app, nextPage);
     formController.close();
@@ -712,10 +956,10 @@ export function bindEvents(app, elements, renderer, formController, authControll
     renderer.render();
   });
 
-  document.addEventListener("submit", (event) => {
+  document.addEventListener("submit", async (event) => {
     if (event.target.id !== "bookmarkForm") return;
     event.preventDefault();
-    if (!authController.requireAuth()) return;
+    if (!(await ensureAuth())) return;
 
     const formData = new FormData(event.target);
     const created = app.store.addBookmark({
@@ -737,10 +981,10 @@ export function bindEvents(app, elements, renderer, formController, authControll
     renderer.render();
   });
 
-  document.addEventListener("submit", (event) => {
+  document.addEventListener("submit", async (event) => {
     if (event.target.id !== "quickNoteForm") return;
     event.preventDefault();
-    if (!authController.requireAuth()) return;
+    if (!(await ensureAuth())) return;
     const formData = new FormData(event.target);
     app.store.quickCaptureNote({
       title: formData.get("title"),
@@ -759,7 +1003,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
   document.addEventListener("submit", async (event) => {
     if (event.target.id !== "subscriptionNotificationForm") return;
     event.preventDefault();
-    if (!authController.requireAuth()) return;
+    if (!(await ensureAuth())) return;
 
     const formData = new FormData(event.target);
     saveSubscriptionNotificationSettings({
@@ -779,10 +1023,10 @@ export function bindEvents(app, elements, renderer, formController, authControll
     renderer.render();
   });
 
-  document.addEventListener("submit", (event) => {
+  document.addEventListener("submit", async (event) => {
     if (event.target.id !== "budgetForm") return;
     event.preventDefault();
-    if (!authController.requireAuth()) return;
+    if (!(await ensureAuth())) return;
 
     const formData = new FormData(event.target);
     app.store.saveBudget({
@@ -795,10 +1039,10 @@ export function bindEvents(app, elements, renderer, formController, authControll
     renderer.render();
   });
 
-  document.addEventListener("submit", (event) => {
+  document.addEventListener("submit", async (event) => {
     if (event.target.id !== "subscriptionBudgetForm") return;
     event.preventDefault();
-    if (!authController.requireAuth()) return;
+    if (!(await ensureAuth())) return;
 
     const formData = new FormData(event.target);
     app.store.saveSubscriptionBudget({
@@ -811,10 +1055,10 @@ export function bindEvents(app, elements, renderer, formController, authControll
     renderer.render();
   });
 
-  document.addEventListener("submit", (event) => {
+  document.addEventListener("submit", async (event) => {
     if (event.target.id !== "favorEventForm") return;
     event.preventDefault();
-    if (!authController.requireAuth()) return;
+    if (!(await ensureAuth())) return;
 
     const formData = new FormData(event.target);
     app.store.addFavorEvent({
@@ -838,10 +1082,10 @@ export function bindEvents(app, elements, renderer, formController, authControll
     renderer.render();
   });
 
-  document.addEventListener("submit", (event) => {
+  document.addEventListener("submit", async (event) => {
     if (event.target.id !== "contactEditForm") return;
     event.preventDefault();
-    if (!authController.requireAuth()) return;
+    if (!(await ensureAuth())) return;
 
     const formData = new FormData(event.target);
     const contactId = event.target.dataset.contactId;
@@ -859,10 +1103,10 @@ export function bindEvents(app, elements, renderer, formController, authControll
     renderer.openContactDetail(contactId);
   });
 
-  document.addEventListener("submit", (event) => {
+  document.addEventListener("submit", async (event) => {
     if (!event.target.classList.contains("favor-event-edit-form")) return;
     event.preventDefault();
-    if (!authController.requireAuth()) return;
+    if (!(await ensureAuth())) return;
 
     const formData = new FormData(event.target);
     const eventId = event.target.dataset.favorEventId;
@@ -895,10 +1139,10 @@ export function bindEvents(app, elements, renderer, formController, authControll
     }
   });
 
-  document.addEventListener("submit", (event) => {
+  document.addEventListener("submit", async (event) => {
     if (event.target.id !== "subscriptionForm") return;
     event.preventDefault();
-    if (!authController.requireAuth()) return;
+    if (!(await ensureAuth())) return;
 
     const formData = new FormData(event.target);
     app.store.addSubscription({
@@ -907,6 +1151,8 @@ export function bindEvents(app, elements, renderer, formController, authControll
       cycle: formData.get("cycle"),
       nextRenewalDate: formData.get("nextRenewalDate"),
       category: formData.get("category"),
+      owner: formData.get("owner"),
+      paymentMethod: formData.get("paymentMethod"),
       projectId: formData.get("projectId"),
       note: formData.get("note"),
       usageFrequency: formData.get("usageFrequency"),

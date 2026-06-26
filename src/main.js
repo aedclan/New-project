@@ -1,6 +1,7 @@
 import { DEFAULT_SORT_BY_PAGE, UI_STATE_KEY } from "./config/constants.js";
 import { APP_VERSION } from "./config/version.js";
 import { getElements } from "./core/dom.js";
+import { createAutoServerSync } from "./core/auto-server-sync.js";
 import { createAuthController } from "./core/auth.js";
 import { bindEvents, initializeTheme } from "./core/events.js";
 import { createFormController } from "./core/form-controller.js";
@@ -41,6 +42,9 @@ const renderer = createRenderer(app, elements);
 const formController = createFormController(elements);
 const authController = createAuthController(elements);
 const billExcelController = createBillExcelController(app, renderer);
+const autoServerSync = createAutoServerSync(app, authController);
+app.autoServerSync = autoServerSync;
+app.store.setChangeHandler(() => autoServerSync.schedule());
 
 const versionBadge = document.querySelector("#appVersionBadge");
 if (versionBadge) {

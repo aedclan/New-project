@@ -4,6 +4,7 @@ import {
   groupSubscriptionReminders,
   loadSubscriptionNotificationSettings,
 } from "../core/subscription-notifications.js";
+import { loadServerSyncState } from "../core/server-sync.js";
 import { getPinyinSearchText } from "../core/utils.js";
 import { navItems } from "../data/nav-items.js";
 import {
@@ -171,6 +172,16 @@ function matchesFilterToken(item, entryType, token) {
       return entryType === value;
     case "bill-type":
       return item.type === value;
+    case "bill-source":
+      return (item.source || "未指定") === value;
+    case "bill-payer":
+      return (item.payer || "未指定") === value;
+    case "bill-fixed":
+      if (value === "any") return Boolean(getBillFixedType(item));
+      return getBillFixedType(item) === value;
+    case "bill-family":
+      if (value === "children") return ["大宝", "二宝"].includes(item.familyMember) || item.payer === "孩子相关";
+      return (item.familyMember || "未指定") === value;
     case "subscription":
       if (value === "urgent") return item.level === "urgent" || item.level === "expired";
       if (value === "upcoming") return item.daysUntilRenewal !== null && item.daysUntilRenewal >= 0 && item.daysUntilRenewal <= 30;
@@ -269,10 +280,16 @@ function getQuickFilters(page, data) {
   }
 
   if (page === "bills") {
+    const billSources = uniqueValues(data.bills, (item) => item.source).slice(0, 3);
+    const billPayers = ["男方", "女方", "共同", "家庭账户", "孩子相关"].filter((payer) => data.bills.some((item) => item.payer === payer));
     return [
       { value: "all", label: "全部" },
       ...uniqueValues(data.bills, (item) => item.type).map((billType) => ({ value: `bill-type:${billType}`, label: billType })),
-      ...uniqueValues(data.bills, (item) => item.category).slice(0, 2).map((category) => ({ value: `category:${category}`, label: category })),
+      ...billSources.map((source) => ({ value: `bill-source:${source}`, label: source })),
+      ...billPayers.map((payer) => ({ value: `bill-payer:${payer}`, label: payer })),
+      { value: "bill-fixed:any", label: "固定支出" },
+      { value: "bill-fixed:房贷", label: "房贷" },
+      { value: "bill-family:children", label: "孩子相关" },
     ];
   }
 
@@ -324,10 +341,25 @@ function getStatusOptions(page, data) {
   }
 
   if (page === "bills") {
-    return uniqueValues(data.bills, (item) => item.type).map((billType) => ({
-      value: `bill-type:${billType}`,
-      label: billType,
-    }));
+    return [
+      ...uniqueValues(data.bills, (item) => item.type).map((billType) => ({
+        value: `bill-type:${billType}`,
+        label: billType,
+      })),
+      ...uniqueValues(data.bills, (item) => item.source).map((source) => ({
+        value: `bill-source:${source}`,
+        label: `来源：${source}`,
+      })),
+      ...uniqueValues(data.bills, (item) => item.payer).map((payer) => ({
+        value: `bill-payer:${payer}`,
+        label: `承担：${payer}`,
+      })),
+      ...uniqueValues(data.bills, (item) => getBillFixedType(item)).map((fixedType) => ({
+        value: `bill-fixed:${fixedType}`,
+        label: `固定：${fixedType}`,
+      })),
+      { value: "bill-family:children", label: "孩子相关" },
+    ];
   }
 
   if (page === "notes") {
@@ -371,6 +403,7 @@ function renderControls(elements, data, ui, page) {
   const statusOptions = compactControls ? [] : getStatusOptions(page, data);
   const tagOptions = compactControls ? [] : getTagOptions(page, data, ui);
   const showTypeFilter = page === "search" || page === "analytics";
+  const statusLabel = page === "bills" ? "筛选" : "状态";
 
   elements.filterRow.innerHTML = `
     <div class="toolbar-shell ${compactControls ? "toolbar-shell--compact" : ""}">
@@ -402,7 +435,7 @@ function renderControls(elements, data, ui, page) {
         }
         ${
           statusOptions.length
-            ? renderSelect("statusFilter", "状态", [{ value: "all", label: "全部状态" }, ...statusOptions], ui.filters.status)
+            ? renderSelect("statusFilter", statusLabel, [{ value: "all", label: page === "bills" ? "全部账单" : "全部状态" }, ...statusOptions], ui.filters.status)
             : ""
         }
         ${
@@ -753,6 +786,52 @@ function getBillFixedType(item) {
   return fixedExpenseKeywords.find((keyword) => text.includes(keyword)) || item.fixedExpenseType || "";
 }
 
+function buildPayerBreakdown(items = []) {
+  return items.filter(isExpenseBill).reduce((map, item) => {
+    const payer = item.payer || "未指定";
+    if (!map[payer]) map[payer] = { payer, amount: 0, count: 0 };
+    map[payer].amount += Number(item.amount || 0);
+    map[payer].count += 1;
+    return map;
+  }, {});
+}
+
+function payerBalancePanel(expenseItems, totalExpense) {
+  const rows = Object.values(buildPayerBreakdown(expenseItems)).sort((left, right) => right.amount - left.amount);
+  const max = Math.max(...rows.map((row) => row.amount), 1);
+  const top = rows[0];
+
+  return `
+    <div class="payer-balance-panel">
+      <div class="payer-balance-head">
+        <span class="eyebrow">承担结构</span>
+        <strong>${top ? `${escapeHtml(top.payer)}承担最多` : "暂无承担数据"}</strong>
+        <small>${top && totalExpense ? `占本月支出 ${Math.round((top.amount / totalExpense) * 100)}%` : "导入时选择男方、女方或共同后显示"}</small>
+      </div>
+      <div class="payer-balance-list">
+        ${
+          rows.length
+            ? rows
+                .map(
+                  (row) => `
+                    <article class="payer-balance-row">
+                      <div>
+                        <strong>${escapeHtml(row.payer)}</strong>
+                        <span>${row.count} 笔 · ${totalExpense ? Math.round((row.amount / totalExpense) * 100) : 0}%</span>
+                      </div>
+                      <div class="payer-balance-meter"><i style="width:${Math.round((row.amount / max) * 100)}%"></i></div>
+                      <b>${formatCurrency(row.amount)}</b>
+                    </article>
+                  `,
+                )
+                .join("")
+            : '<span class="muted-text">暂无承担人数据</span>'
+        }
+      </div>
+    </div>
+  `;
+}
+
 function familyCashflowPanel(items, income, expense, month) {
   const expenseItems = items.filter(isExpenseBill);
   const fixedItems = expenseItems.filter((item) => getBillFixedType(item));
@@ -765,24 +844,6 @@ function familyCashflowPanel(items, income, expense, month) {
     .reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const disposable = income - fixedExpense;
   const mortgageRate = income > 0 ? Math.round((mortgageExpense / income) * 100) : 0;
-  const payerTotals = expenseItems.reduce((map, item) => {
-    const payer = item.payer || "未指定";
-    map[payer] = (map[payer] || 0) + Number(item.amount || 0);
-    return map;
-  }, {});
-
-  const payerRows = Object.entries(payerTotals)
-    .sort((left, right) => right[1] - left[1])
-    .map(
-      ([payer, total]) => `
-        <div class="cashflow-mini-row">
-          <span>${escapeHtml(payer)}</span>
-          <strong>${formatCurrency(total)}</strong>
-        </div>
-      `,
-    )
-    .join("");
-
   return `
     <section class="panel cashflow-panel">
       <div class="panel-head">
@@ -812,10 +873,7 @@ function familyCashflowPanel(items, income, expense, month) {
         </article>
       </div>
       <div class="cashflow-split">
-        <div>
-          <span class="eyebrow">承担人分布</span>
-          <div class="cashflow-mini-list">${payerRows || '<span class="muted-text">暂无承担人数据</span>'}</div>
-        </div>
+        ${payerBalancePanel(expenseItems, expense)}
         <div>
           <span class="eyebrow">数据结构</span>
           <div class="cashflow-pill-row">
@@ -1038,6 +1096,46 @@ function fixedExpenseTrend(allBills, currentMonth) {
   `;
 }
 
+function mortgageDetailList(items, month) {
+  return `
+    <div class="mortgage-detail-list">
+      ${
+        items.length
+          ? items
+              .map(
+                (item) => `
+                  <article class="mortgage-detail-row">
+                    <div>
+                      <strong>${escapeHtml(item.title || "房贷")}</strong>
+                      <span>${escapeHtml(item.payer || "未指定")} · ${escapeHtml(item.date || "")}</span>
+                    </div>
+                    <div>
+                      <b>${formatCurrency(item.amount)}</b>
+                      <small>${item.mortgageDueDay ? `${daysUntilDueDay(month, item.mortgageDueDay)} · 还款日 ${item.mortgageDueDay}` : "未设置还款日"}</small>
+                    </div>
+                    <em>${item.mortgageRemainingTerms ? `剩余 ${escapeHtml(item.mortgageRemainingTerms)} 期` : "未设置期数"}</em>
+                  </article>
+                `,
+              )
+              .join("")
+          : '<span class="muted-text">暂无房贷账单。录入账单时把固定支出设为“房贷”后会显示。</span>'
+      }
+    </div>
+  `;
+}
+
+function fixedExpenseSummary(fixedRows, fixedTotal) {
+  const top = fixedRows[0];
+  const topRate = top && fixedTotal ? Math.round((top[1] / fixedTotal) * 100) : 0;
+  return `
+    <div class="fixed-summary-card">
+      <span>最大固定项</span>
+      <strong>${escapeHtml(top?.[0] || "暂无")}</strong>
+      <p>${top ? `${formatCurrency(top[1])} · 占固定支出 ${topRate}%` : "暂无固定支出"}</p>
+    </div>
+  `;
+}
+
 function fixedExpensePanel(items, allBills, income, expense, month) {
   const expenseItems = items.filter(isExpenseBill);
   const fixedItems = expenseItems.filter((item) => getBillFixedType(item));
@@ -1077,6 +1175,7 @@ function fixedExpensePanel(items, allBills, income, expense, month) {
             <span>固定支出清单</span>
             <strong>${fixedItems.length} 笔</strong>
           </div>
+          ${fixedExpenseSummary(fixedRows, fixedTotal)}
           ${expenseInsightList(fixedRows, "暂无固定支出")}
         </article>
         <article class="fixed-expense-card">
@@ -1086,6 +1185,13 @@ function fixedExpensePanel(items, allBills, income, expense, month) {
           </div>
           ${fixedExpenseTrend(allBills, month)}
         </article>
+      </div>
+      <div class="mortgage-detail-panel">
+        <div class="panel-head">
+          <h3>房贷明细</h3>
+          <span class="results-count">${mortgageItems.length} 笔 · ${formatCurrency(mortgageTotal)}</span>
+        </div>
+        ${mortgageDetailList(mortgageItems, month)}
       </div>
       <div class="fixed-ledger">
         ${
@@ -1300,11 +1406,147 @@ function billTotalOverviewPanel(allBills, activeMonth) {
   `;
 }
 
+function billScopeOverviewPanel(allBills, monthlyItems, activeMonth, budget = {}) {
+  const allExpenseItems = (allBills || []).filter(isExpenseBill);
+  const monthExpenseItems = (monthlyItems || []).filter(isExpenseBill);
+  const totalIncome = sumBills((allBills || []).filter(isIncomeBill));
+  const totalExpense = sumBills(allExpenseItems);
+  const monthIncome = sumBills((monthlyItems || []).filter(isIncomeBill));
+  const monthExpense = sumBills(monthExpenseItems);
+  const monthBudget = Number(budget.totalBudget || 0);
+  const sourceRows = topExpenseRows(monthExpenseItems, (item) => item.source || "未指定", 4);
+  const payerRows = topExpenseRows(monthExpenseItems, (item) => item.payer || "未指定", 4);
+  const categoryRows = topExpenseRows(monthExpenseItems, (item) => item.category || "未分类", 4);
+  const largestExpense = [...monthExpenseItems].sort((left, right) => Number(right.amount || 0) - Number(left.amount || 0))[0];
+
+  return `
+    <section class="panel bill-scope-panel">
+      <div class="panel-head">
+        <h2>月度与累计对照</h2>
+        <span class="results-count">${escapeHtml(activeMonth)} · 数据口径分开</span>
+      </div>
+      <div class="bill-scope-grid">
+        <article class="bill-scope-card bill-scope-card--primary">
+          <span>当前月份</span>
+          <strong>${formatCurrency(monthExpense)}</strong>
+          <small>收入 ${formatCurrency(monthIncome)} · 结余 ${formatCurrency(monthIncome - monthExpense)} · ${monthExpenseItems.length} 笔支出</small>
+          ${
+            monthBudget
+              ? `<div class="bill-scope-meter"><i style="width:${Math.min(100, Math.round((monthExpense / monthBudget) * 100))}%"></i></div><em>预算剩余 ${formatCurrency(monthBudget - monthExpense)}</em>`
+              : `<em>未设置月预算</em>`
+          }
+        </article>
+        <article class="bill-scope-card">
+          <span>累计总数据</span>
+          <strong>${formatCurrency(totalExpense)}</strong>
+          <small>累计收入 ${formatCurrency(totalIncome)} · 累计结余 ${formatCurrency(totalIncome - totalExpense)}</small>
+          <em>${(allBills || []).length} 笔账单 · ${getBillHistoryRows(allBills).length} 个月</em>
+        </article>
+        <article class="bill-scope-card">
+          <span>本月最大支出</span>
+          <strong>${largestExpense ? formatCurrency(largestExpense.amount) : "暂无"}</strong>
+          <small>${escapeHtml(largestExpense?.title || largestExpense?.category || "暂无支出")}</small>
+          <em>${escapeHtml(largestExpense?.payer || "未指定")} · ${escapeHtml(largestExpense?.source || "未指定")}</em>
+        </article>
+      </div>
+      <div class="bill-scope-insights">
+        <article>
+          <h3>来源</h3>
+          ${expenseInsightList(sourceRows, "暂无来源数据")}
+        </article>
+        <article>
+          <h3>承担人</h3>
+          ${expenseInsightList(payerRows, "暂无承担人数据")}
+        </article>
+        <article>
+          <h3>分类动向</h3>
+          ${expenseInsightList(categoryRows, "暂无分类数据")}
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+function billReviewMiniList(items, emptyText) {
+  return `
+    <div class="bill-review-mini-list">
+      ${
+        items.length
+          ? items
+              .slice(0, 4)
+              .map(
+                (item) => `
+                  <button class="bill-review-row" data-open="bills:${escapeHtml(item.id)}" type="button">
+                    <span>${escapeHtml(item.date || "未设置日期")}</span>
+                    <strong>${escapeHtml(item.title || "未命名账单")}</strong>
+                    <b>${formatCurrency(item.amount)}</b>
+                  </button>
+                `,
+              )
+              .join("")
+          : `<span class="muted-text">${escapeHtml(emptyText)}</span>`
+      }
+    </div>
+  `;
+}
+
+function billImportReviewPanel(items, month) {
+  const expenseItems = items.filter(isExpenseBill);
+  const averageExpense = expenseItems.length ? sumBills(expenseItems) / expenseItems.length : 0;
+  const highAmountItems = expenseItems
+    .filter((item) => Number(item.amount || 0) >= Math.max(1000, averageExpense * 2.5))
+    .sort((left, right) => Number(right.amount || 0) - Number(left.amount || 0));
+  const missingSource = items.filter((item) => !item.source || item.source === "未指定");
+  const missingPayer = items.filter((item) => !item.payer || item.payer === "未指定");
+  const uncategorized = items.filter((item) => !item.category || item.category === "未分类");
+  const reviewCount = highAmountItems.length + missingSource.length + missingPayer.length + uncategorized.length;
+
+  return `
+    <section class="panel bill-review-panel">
+      <div class="panel-head">
+        <h2>导入后复核</h2>
+        <span class="results-count">${escapeHtml(month)} · ${reviewCount} 项待看</span>
+      </div>
+      <div class="bill-review-grid">
+        <article class="bill-review-card ${highAmountItems.length ? "bill-review-card--warning" : ""}">
+          <div class="expense-card-head">
+            <span>异常金额</span>
+            <strong>${highAmountItems.length}</strong>
+          </div>
+          ${billReviewMiniList(highAmountItems, "暂无异常大额支出")}
+        </article>
+        <article class="bill-review-card">
+          <div class="expense-card-head">
+            <span>缺少来源</span>
+            <strong>${missingSource.length}</strong>
+          </div>
+          ${billReviewMiniList(missingSource, "来源字段完整")}
+        </article>
+        <article class="bill-review-card">
+          <div class="expense-card-head">
+            <span>缺少归属</span>
+            <strong>${missingPayer.length}</strong>
+          </div>
+          ${billReviewMiniList(missingPayer, "承担人字段完整")}
+        </article>
+        <article class="bill-review-card">
+          <div class="expense-card-head">
+            <span>未分类</span>
+            <strong>${uncategorized.length}</strong>
+          </div>
+          ${billReviewMiniList(uncategorized, "分类字段完整")}
+        </article>
+      </div>
+    </section>
+  `;
+}
+
 function renderBills(elements, data, ui, store) {
   renderControls(elements, data, ui, "bills");
   const fallbackMonth = getBillHistoryRows(data.bills || [])[0]?.month || data.budgets?.month || new Date().toISOString().slice(0, 7);
   const month = ui.filters.billMonth || data.budgets?.viewMonth || fallbackMonth;
   const monthlyStats = store.getMonthlyBillStats(month);
+  const monthlyItemCount = monthlyStats.items.length;
   const items = filterCollection(
     monthlyStats.items.map((item) => ({ ...item, entryType: "bills" })),
     ui,
@@ -1334,6 +1576,8 @@ function renderBills(elements, data, ui, store) {
       ${statCard("月结余", formatCurrency(income - expense), "收入减去支出")}
       ${statCard("预算剩余", formatCurrency((budget.totalBudget || 0) - budgetSpent), "本月预算")}
     </div>
+    ${billScopeOverviewPanel(data.bills || [], items, month, budget)}
+    ${billImportReviewPanel(items, month)}
     ${billTotalOverviewPanel(data.bills || [], month)}
     ${familyCashflowPanel(items, income, expense, month)}
     ${familyDecisionPanel(items, data, store, income, expense, month)}
@@ -1416,6 +1660,13 @@ function renderBills(elements, data, ui, store) {
       ${categoryBars(items.filter(isExpense))}
     </section>
     <section class="table-wrap">
+      <div class="table-head">
+        <div>
+          <h2>账单明细</h2>
+          <span>${escapeHtml(month)} · 当前筛选 ${items.length} / ${monthlyItemCount} 条</span>
+        </div>
+        <span class="results-count">点击行可查看详情</span>
+      </div>
       <table>
         <thead>
           <tr>
@@ -1433,6 +1684,90 @@ function renderBills(elements, data, ui, store) {
       </table>
       ${items.length ? "" : emptyState("暂无符合条件的账单")}
     </section>
+  `;
+}
+
+function subscriptionDistributionRows(rows, totalAmount) {
+  return rows
+    .slice(0, 4)
+    .map((row) => {
+      const percent = Math.round((Number(row.amount || 0) / Math.max(totalAmount, 1)) * 100);
+      return `
+        <article class="subscription-distribution-row">
+          <div>
+            <strong>${escapeHtml(row.label)}</strong>
+            <span>${row.count} 项</span>
+          </div>
+          <div class="subscription-distribution-meter"><i style="width:${percent}%"></i></div>
+          <em>${formatCurrency(row.amount)} / 月</em>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderSubscriptionMaturityPanel(overview) {
+  const nextItem = overview.upcoming[0] || overview.items[0];
+  const riskLabel = overview.expired.length
+    ? `已过期 ${overview.expired.length} 项`
+    : overview.urgent.length
+      ? `临期 ${overview.urgent.length} 项`
+      : "状态稳定";
+  return `
+    <section class="panel subscription-maturity-panel">
+      <div class="subscription-maturity-lead">
+        <span class="eyebrow">Subscription Control</span>
+        <h2>订阅管理总览</h2>
+        <p>优先看临期风险、月均成本、扣费归属和付款渠道，保证订阅不会漏扣、重复扣或忘记复盘。</p>
+      </div>
+      <div class="subscription-maturity-grid">
+        <article class="subscription-maturity-card ${overview.urgent.length ? "is-alert" : ""}">
+          <span>到期风险</span>
+          <strong>${escapeHtml(riskLabel)}</strong>
+          <em>${nextItem ? `${escapeHtml(nextItem.name)} · ${escapeHtml(nextItem.reminderLabel || "")}` : "暂无订阅"}</em>
+        </article>
+        <article class="subscription-maturity-card">
+          <span>月均成本</span>
+          <strong>${formatCurrency(overview.estimatedMonthlyCost)}</strong>
+          <em>年化 ${formatCurrency(overview.estimatedAnnualCost)}</em>
+        </article>
+        <article class="subscription-maturity-card">
+          <span>续费方式</span>
+          <strong>${overview.autoRenewing.length} 自动 / ${overview.manualRenewing.length} 手动</strong>
+          <em>手动项目需在到期前确认</em>
+        </article>
+        <article class="subscription-maturity-card">
+          <span>复盘队列</span>
+          <strong>${overview.reviewQueue.length} 项</strong>
+          <em>按使用频率、必要性和满意度判断</em>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+function renderSubscriptionDistributionPanel(overview) {
+  return `
+    <div class="subscription-distribution-grid">
+      <section class="panel subscription-distribution-panel">
+        <div class="panel-head">
+          <h2>归属分布</h2>
+          <span class="results-count">谁在使用 / 谁承担</span>
+        </div>
+        <div class="subscription-distribution-list">
+          ${subscriptionDistributionRows(overview.ownerTotals, overview.estimatedMonthlyCost) || emptyState("暂无归属数据")}
+        </div>
+      </section>
+      <section class="panel subscription-distribution-panel">
+        <div class="panel-head">
+          <h2>付款渠道</h2>
+          <span class="results-count">扣费从哪里走</span>
+        </div>
+        <div class="subscription-distribution-list">
+          ${subscriptionDistributionRows(overview.paymentTotals, overview.estimatedMonthlyCost) || emptyState("暂无付款渠道")}
+        </div>
+      </section>
+    </div>
   `;
 }
 
@@ -1474,6 +1809,22 @@ function renderSubscriptionForm() {
           <label>
             分类
             <input name="category" placeholder="例如：工具 / 影音 / 存储" />
+          </label>
+          <label>
+            归属人
+            <select name="owner">
+              <option value="家庭账户">家庭账户</option>
+              <option value="男方">男方</option>
+              <option value="女方">女方</option>
+              <option value="共同">共同</option>
+              <option value="孩子相关">孩子相关</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-grid">
+          <label>
+            付款渠道
+            <input name="paymentMethod" placeholder="例如：支付宝 / 微信 / 信用卡 / App Store" />
           </label>
           <label>
             关联项目
@@ -1558,7 +1909,7 @@ function subscriptionCompactRow(item) {
           ${item.autoRenew ? '<span class="tag">自动续费</span>' : '<span class="tag">手动续费</span>'}
         </div>
         <strong>${escapeHtml(item.name)}</strong>
-        <span class="muted-text">${escapeHtml(item.category || "订阅")} · ${escapeHtml(cycleLabel)} · ${escapeHtml(item.status || "active")}</span>
+        <span class="muted-text">${escapeHtml(item.category || "订阅")} · ${escapeHtml(cycleLabel)} · ${escapeHtml(item.owner || "家庭账户")} · ${escapeHtml(item.paymentMethod || "未指定渠道")}</span>
       </div>
       <div class="subscription-row__money">
         <strong>${formatCurrency(item.amount)}</strong>
@@ -1595,7 +1946,9 @@ function renderSubscriptions(elements, data, ui, store) {
       ${statCard("月均成本", formatCurrency(overview.estimatedMonthlyCost), "折算后的月度压力")}
       ${statCard("待复盘", overview.reviewQueue.length, "续费前需要判断的订阅")}
     </div>
+    ${renderSubscriptionMaturityPanel(overview)}
     ${renderSubscriptionForm()}
+    ${renderSubscriptionDistributionPanel(overview)}
     <section class="panel subscription-list-panel">
       <div class="panel-head">
         <h2>订阅项目</h2>
@@ -2862,25 +3215,115 @@ function renderAnalytics(elements, data, ui) {
 function renderSettings(elements, data, ui) {
   renderControls(elements, data, ui, "settings");
   const notificationSettings = loadSubscriptionNotificationSettings();
+  const serverSyncState = loadServerSyncState();
+  const moduleStats = [
+    ["生活收支", (data.bills || []).length, "可单独清空"],
+    ["订阅", (data.subscriptions || []).length, "到期提醒"],
+    ["人情往来", (data.favorEvents || []).length, `${(data.contacts || []).length} 位人物`],
+    ["笔记 / 收藏", (data.notes || []).length + (data.bookmarks || []).length, "知识资料"],
+  ];
   elements.contentArea.innerHTML = `
-    <section class="panel">
-      <div class="panel-head"><h2>数据管理</h2></div>
-      <p class="panel-copy">当前版本使用浏览器本地存储，适合原型开发和自用验证。后续版本会逐步升级到云端同步与登录权限。</p>
-      <div class="topbar-actions">
-        <button class="ghost-button" id="exportData" type="button">导出 JSON</button>
-        <button class="ghost-button" id="resetDemo" type="button">恢复示例数据</button>
-        <button class="ghost-button danger-button" id="clearBillsData" type="button">清空生活收支</button>
-        <button class="ghost-button danger-button" id="clearData" type="button">清空全部数据</button>
+    <section class="panel settings-hero">
+      <div>
+        <span class="eyebrow">Local Storage</span>
+        <h2>设置与数据安全</h2>
+        <p class="panel-copy">当前版本使用浏览器本地存储，适合原型开发和自用验证。执行清空、恢复或大批量导入前，建议先导出备份。</p>
+      </div>
+      <div class="settings-stat-grid">
+        ${moduleStats.map(([label, value, hint]) => statCard(label, value, hint)).join("")}
       </div>
     </section>
-    <section class="panel">
+
+    <section class="panel settings-section">
+      <div class="panel-head">
+        <h2>备份与清理</h2>
+        <span class="results-count">JSON / 示例 / 危险操作</span>
+      </div>
+      <div class="settings-action-grid">
+        <article class="settings-action-card">
+          <div>
+            <strong>完整备份</strong>
+            <span>导出当前浏览器内的全部数据，适合更新前留档。</span>
+          </div>
+          <button class="ghost-button" id="exportData" type="button">导出 JSON</button>
+        </article>
+        <article class="settings-action-card">
+          <div>
+            <strong>恢复演示数据</strong>
+            <span>用于回到默认样例，会覆盖当前本地数据。</span>
+          </div>
+          <button class="ghost-button" id="resetDemo" type="button">恢复示例数据</button>
+        </article>
+        <article class="settings-action-card settings-action-card--danger">
+          <div>
+            <strong>清空生活收支</strong>
+            <span>只删除生活收支，不影响订阅、人情往来、笔记和收藏。</span>
+          </div>
+          <button class="ghost-button danger-button" id="clearBillsData" type="button">清空生活收支</button>
+        </article>
+        <article class="settings-action-card settings-action-card--danger">
+          <div>
+            <strong>清空全部数据</strong>
+            <span>删除所有模块数据，执行前请确认已经导出备份。</span>
+          </div>
+          <button class="ghost-button danger-button" id="clearData" type="button">清空全部数据</button>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel settings-section server-sync-panel">
+      <div class="panel-head">
+        <h2>服务器数据同步</h2>
+        <span class="results-count">V0.25 数据持久化底座</span>
+      </div>
+      <p class="panel-copy">用于把当前浏览器数据保存到 VPS 数据卷，或从 VPS 恢复到当前浏览器。读取服务器会覆盖本地数据，执行前建议先导出 JSON。</p>
+      <div class="server-sync-grid">
+        <label>
+          同步密钥
+          <input id="serverSyncToken" type="password" placeholder="${serverSyncState.hasToken ? serverSyncState.maskedToken : "输入 VPS 环境变量 PERSONAL_HUB_SYNC_TOKEN"}" autocomplete="off" />
+        </label>
+        <article class="server-sync-status-card">
+          <span>当前浏览器</span>
+          <strong>${serverSyncState.hasToken ? "已保存密钥" : "未保存密钥"}</strong>
+          <em>${serverSyncState.lastPushedAt ? `最近保存：${escapeHtml(serverSyncState.lastPushedAt)}` : "密钥只保存在当前浏览器，用于访问 /api/data。"}</em>
+        </article>
+      </div>
+      <label class="setting-toggle server-sync-auto-toggle">
+        <input id="serverSyncAutoEnabled" type="checkbox" ${serverSyncState.autoEnabled ? "checked" : ""} />
+        <span>自动保存到服务器</span>
+      </label>
+      <div class="settings-action-row">
+        <button class="ghost-button" id="checkServerSyncStatus" type="button">检查服务器</button>
+        <button class="ghost-button" id="pullServerData" type="button">从服务器读取</button>
+        <button class="ghost-button" id="mergeServerData" type="button">合并服务器数据</button>
+        <button class="primary-button" id="pushServerData" type="button">保存到服务器</button>
+      </div>
+    </section>
+
+    <section class="panel settings-section">
       <div class="panel-head">
         <h2>财务数据管理</h2>
         <span class="results-count">微信 / 支付宝 / Excel / CSV</span>
       </div>
       <p class="panel-copy">用于整站财务数据迁移。导入时会自动识别微信、支付宝、生活收支、人情往来、关系人和订阅项目，CSV 会自动处理常见中文编码，并在写入前提示重复账单。</p>
       <div class="finance-import-options">
+        <input id="financeImportSource" type="hidden" value="自动识别" />
         <input id="financeImportPayer" type="hidden" value="家庭账户" />
+        <div class="ui-menu-select finance-payer-menu" data-menu-root="finance-source">
+          <button class="ui-menu-select__trigger" data-menu-toggle="finance-source" type="button" aria-expanded="false">
+            <span>本次导入来源</span>
+            <strong id="financeImportSourceLabel">自动识别</strong>
+          </button>
+          <div class="ui-menu-select__panel">
+            ${["自动识别", "支付宝", "微信", "Excel 导入"]
+              .map(
+                (source) => `
+                  <button class="${source === "自动识别" ? "is-active" : ""}" data-finance-source="${escapeHtml(source)}" type="button">${escapeHtml(source)}</button>
+                `,
+              )
+              .join("")}
+          </div>
+        </div>
         <div class="ui-menu-select finance-payer-menu" data-menu-root="finance-payer">
           <button class="ui-menu-select__trigger" data-menu-toggle="finance-payer" type="button" aria-expanded="false">
             <span>本次导入归属</span>
@@ -2896,72 +3339,85 @@ function renderSettings(elements, data, ui) {
               .join("")}
           </div>
         </div>
-        <span>适用于支付宝、微信原始账单；文件内已有“承担人”列时优先使用文件值。</span>
+        <span>适用于支付宝、微信原始账单；文件内已有“来源”或“承担人”列时优先使用文件值。</span>
       </div>
-      <div class="topbar-actions">
+      <div class="settings-action-row">
         <button class="ghost-button" id="downloadBillExcelTemplate" type="button">下载模板</button>
         <button class="ghost-button" id="exportFinanceExcel" type="button">导出财务 Excel</button>
         <button class="primary-button" id="importBillExcelButton" type="button">导入 Excel</button>
         <input id="billExcelFile" type="file" hidden />
       </div>
     </section>
-    <section class="panel">
+
+    <section class="panel settings-section">
       <div class="panel-head">
         <h2>订阅通知</h2>
-        <span class="results-count">V1 / V2 / V5</span>
+        <span class="results-count">站内 / 浏览器 / 邮件</span>
       </div>
       <form class="quick-note-form" id="subscriptionNotificationForm">
-        <div class="form-grid">
-          <label class="setting-toggle">
-            <input name="siteEnabled" type="checkbox" ${notificationSettings.siteEnabled ? "checked" : ""} />
-            <span>站内提醒</span>
-          </label>
-          <label class="setting-toggle">
-            <input name="browserEnabled" type="checkbox" ${notificationSettings.browserEnabled ? "checked" : ""} />
-            <span>浏览器通知</span>
-          </label>
+        <div class="settings-form-section">
+          <span class="settings-form-title">提醒渠道</span>
+          <div class="form-grid">
+            <label class="setting-toggle">
+              <input name="siteEnabled" type="checkbox" ${notificationSettings.siteEnabled ? "checked" : ""} />
+              <span>站内提醒</span>
+            </label>
+            <label class="setting-toggle">
+              <input name="browserEnabled" type="checkbox" ${notificationSettings.browserEnabled ? "checked" : ""} />
+              <span>浏览器通知</span>
+            </label>
+          </div>
         </div>
-        <div class="form-grid">
-          <label>
-            提前提醒天数
-            <input name="leadDays" value="${escapeHtml(notificationSettings.leadDays.join(","))}" placeholder="0,1,3,7" />
-          </label>
-          <label>
-            每日提醒时间
-            <input name="dailyTime" type="time" value="${escapeHtml(notificationSettings.dailyTime)}" />
-          </label>
+        <div class="settings-form-section">
+          <span class="settings-form-title">提醒规则</span>
+          <div class="form-grid">
+            <label>
+              提前提醒天数
+              <input name="leadDays" value="${escapeHtml(notificationSettings.leadDays.join(","))}" placeholder="0,1,3,7" />
+            </label>
+            <label>
+              每日提醒时间
+              <input name="dailyTime" type="time" value="${escapeHtml(notificationSettings.dailyTime)}" />
+            </label>
+          </div>
         </div>
-        <div class="form-grid">
-          <label class="setting-toggle">
-            <input name="remindAutoRenew" type="checkbox" ${notificationSettings.remindAutoRenew ? "checked" : ""} />
-            <span>提醒自动续费</span>
-          </label>
-          <label class="setting-toggle">
-            <input name="remindManualRenew" type="checkbox" ${notificationSettings.remindManualRenew ? "checked" : ""} />
-            <span>提醒手动续费</span>
-          </label>
+        <div class="settings-form-section">
+          <span class="settings-form-title">提醒范围</span>
+          <div class="form-grid">
+            <label class="setting-toggle">
+              <input name="remindAutoRenew" type="checkbox" ${notificationSettings.remindAutoRenew ? "checked" : ""} />
+              <span>提醒自动续费</span>
+            </label>
+            <label class="setting-toggle">
+              <input name="remindManualRenew" type="checkbox" ${notificationSettings.remindManualRenew ? "checked" : ""} />
+              <span>提醒手动续费</span>
+            </label>
+          </div>
+          <div class="form-grid">
+            <label class="setting-toggle">
+              <input name="remindHighCost" type="checkbox" ${notificationSettings.remindHighCost ? "checked" : ""} />
+              <span>提醒高成本订阅</span>
+            </label>
+            <label class="setting-toggle">
+              <input name="remindLowValue" type="checkbox" ${notificationSettings.remindLowValue ? "checked" : ""} />
+              <span>提醒低价值订阅</span>
+            </label>
+          </div>
         </div>
-        <div class="form-grid">
-          <label class="setting-toggle">
-            <input name="remindHighCost" type="checkbox" ${notificationSettings.remindHighCost ? "checked" : ""} />
-            <span>提醒高成本订阅</span>
-          </label>
-          <label class="setting-toggle">
-            <input name="remindLowValue" type="checkbox" ${notificationSettings.remindLowValue ? "checked" : ""} />
-            <span>提醒低价值订阅</span>
-          </label>
+        <div class="settings-form-section">
+          <span class="settings-form-title">邮件通知</span>
+          <div class="form-grid">
+            <label class="setting-toggle">
+              <input name="emailEnabled" type="checkbox" ${notificationSettings.emailEnabled ? "checked" : ""} />
+              <span>邮件通知</span>
+            </label>
+            <label>
+              接收邮箱
+              <input name="email" type="email" value="${escapeHtml(notificationSettings.email)}" placeholder="you@example.com" />
+            </label>
+          </div>
         </div>
-        <div class="form-grid">
-          <label class="setting-toggle">
-            <input name="emailEnabled" type="checkbox" ${notificationSettings.emailEnabled ? "checked" : ""} />
-            <span>邮件通知</span>
-          </label>
-          <label>
-            接收邮箱
-            <input name="email" type="email" value="${escapeHtml(notificationSettings.email)}" placeholder="you@example.com" />
-          </label>
-        </div>
-        <div class="topbar-actions">
+        <div class="settings-action-row">
           <button class="ghost-button" id="requestBrowserNotification" type="button">开启浏览器通知</button>
           <button class="ghost-button" id="testSubscriptionEmail" type="button">发送测试邮件</button>
           <button class="ghost-button" id="scanSubscriptionEmail" type="button">扫描并发送邮件</button>
@@ -2969,23 +3425,39 @@ function renderSettings(elements, data, ui) {
         </div>
       </form>
     </section>
-    <section class="panel">
+    <section class="panel settings-section">
       <div class="panel-head"><h2>当前升级进度</h2></div>
-      <div class="list-stack">
+      <div class="settings-roadmap-list">
         ${noteRow({
           id: "roadmap-1",
-          title: "0.11.1 体验修正版",
-          description: "已简化人情结构，账单和人情改为统一 Excel 导出，收藏夹用于外部资料，音乐播放器改为浮动网易云歌单。",
-          category: "当前版本",
-          tags: ["0.11.1", "已完成"],
-          updatedAt: "本轮已更新",
+          title: "V0.22 稳定上线版",
+          description: "当前阶段：检查线上稳定性、统一 UI、清理明显错误、整理设置面板与部署前检查。",
+          category: "进行中",
+          tags: ["稳定", "上线"],
+          updatedAt: "当前推进",
         })}
         ${noteRow({
           id: "roadmap-2",
-          title: "0.12.0 笔记知识库版",
-          description: "下一轮聚焦收件箱、标签整理、Markdown 增强、笔记转事项和回顾。",
+          title: "V0.23 生活收支增强版",
+          description: "下一阶段：支付宝 / 微信导入、男女双方归属、历史月份、家庭消费动向与房贷压力分析。",
           category: "下一版本",
-          tags: ["0.12.0", "规划"],
+          tags: ["生活收支", "规划"],
+          updatedAt: "待开发",
+        })}
+        ${noteRow({
+          id: "roadmap-3",
+          title: "V0.24 订阅管理成熟版",
+          description: "订阅到期提醒、邮件通知、年度成本、支付渠道和归属分类。",
+          category: "后续版本",
+          tags: ["订阅", "提醒"],
+          updatedAt: "待开发",
+        })}
+        ${noteRow({
+          id: "roadmap-4",
+          title: "V0.25 数据安全与真实登录版",
+          description: "真实账号、数据库持久化、Docker 数据卷、自动备份与恢复。",
+          category: "后续版本",
+          tags: ["登录", "数据库"],
           updatedAt: "待开发",
         })}
       </div>

@@ -1,6 +1,8 @@
 ﻿import { createServer } from "node:http";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
+import { handleAuthRequest } from "./auth-service.mjs";
+import { handlePersistentDataRequest } from "./persistent-data-service.mjs";
 import { sendSubscriptionScanEmails, sendSubscriptionTestEmail } from "./subscription-email-service.mjs";
 
 const root = resolve(process.cwd());
@@ -56,6 +58,23 @@ const server = createServer((request, response) => {
     return;
   }
 
+  handleAuthRequest(request, response)
+    .then((handled) => {
+      if (handled) return true;
+      return handlePersistentDataRequest(request, response);
+    })
+    .then((handled) => {
+      if (!handled) serveStaticFile(request, response);
+    })
+    .catch((error) => {
+      response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, message: error.message || "服务器数据服务异常" }));
+    });
+});
+
+function serveStaticFile(request, response) {
+  if (response.writableEnded) return;
+
   if (request.method === "POST" && request.url?.startsWith("/api/subscription-email/")) {
     let body = "";
     request.on("data", (chunk) => {
@@ -91,7 +110,7 @@ const server = createServer((request, response) => {
     "Cache-Control": "no-store",
   });
   createReadStream(filePath).pipe(response);
-});
+}
 
 server.listen(port, host, () => {
   console.log(`Personal Content Hub is running at http://${host}:${port}`);

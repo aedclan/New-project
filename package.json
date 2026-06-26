@@ -1,6 +1,6 @@
 {
   "name": "personal-content-hub",
-  "version": "0.21.0",
+  "version": "0.25.0",
   "private": true,
   "description": "Mobbin-style personal workbench for tasks, bills, notes, and collections.",
   "type": "module",
@@ -8,6 +8,7 @@
     "dev": "node scripts/dev-server.mjs",
     "start": "node scripts/dev-server.mjs",
     "check": "node scripts/check.mjs",
+    "backup:data": "node scripts/backup-persistent-data.mjs",
     "send-subscription-emails": "node scripts/send-subscription-emails.mjs"
   },
   "keywords": [

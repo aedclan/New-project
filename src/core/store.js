@@ -436,10 +436,12 @@ function buildEntryPayload(formData, existingEntry = null) {
 export function createStore() {
   let data = loadState();
   let recentViews = loadRecentViews();
+  let changeHandler = null;
 
-  function save() {
+  function save(options = {}) {
     normalizeLegacyData(data);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    if (options.notify !== false) changeHandler?.(data);
   }
 
   function saveRecentViews() {
@@ -516,6 +518,9 @@ export function createStore() {
     getData() {
       return data;
     },
+    setChangeHandler(handler) {
+      changeHandler = typeof handler === "function" ? handler : null;
+    },
     exportData() {
       return {
         ...clone(data),
@@ -524,6 +529,18 @@ export function createStore() {
         subscriptions: clone(data.subscriptions || []),
         bookmarks: clone(data.bookmarks || []),
       };
+    },
+    importData(payload) {
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+      const fallback = clone(defaultData);
+      data = {
+        ...fallback,
+        ...clone(payload),
+        budgets: { ...fallback.budgets, ...(payload.budgets || {}) },
+      };
+      normalizeLegacyData(data);
+      save({ notify: false });
+      return true;
     },
     getEntry(type, id) {
       return findEntry(type, id);
@@ -880,6 +897,8 @@ export function createStore() {
         cycle: String(payload.cycle || "").trim() || "monthly",
         nextRenewalDate: String(payload.nextRenewalDate || "").trim(),
         category: String(payload.category || "").trim() || "订阅",
+        owner: String(payload.owner || "").trim() || "家庭账户",
+        paymentMethod: String(payload.paymentMethod || "").trim(),
         projectId: String(payload.projectId || "").trim(),
         note: String(payload.note || "").trim(),
         usageFrequency: String(payload.usageFrequency || "").trim() || "unknown",
@@ -914,6 +933,9 @@ export function createStore() {
         amount: Number(subscription.amount || 0),
         category: subscription.category || "订阅",
         date: today,
+        source: subscription.paymentMethod || "订阅扣费",
+        payer: subscription.owner || "家庭账户",
+        paymentMethod: subscription.paymentMethod || "",
         tags: ["订阅", subscription.category].filter(Boolean),
         projectId: subscription.projectId || "",
         subscriptionId: subscription.id,
@@ -1067,6 +1089,18 @@ export function createStore() {
 
       const activeSubscriptions = subscriptions.filter((item) => item.status !== "paused" && item.status !== "cancelled");
       const estimatedMonthlyCost = activeSubscriptions.reduce((sum, item) => sum + Number(item.monthlyCost || 0), 0);
+      const buildTotals = (items, getKey) =>
+        Object.entries(
+          items.reduce((map, item) => {
+            const key = getKey(item) || "未指定";
+            map[key] = map[key] || { count: 0, amount: 0 };
+            map[key].count += 1;
+            map[key].amount += Number(item.monthlyCost || 0);
+            return map;
+          }, {}),
+        )
+          .map(([label, value]) => ({ label, count: value.count, amount: value.amount }))
+          .sort((left, right) => right.amount - left.amount);
       const categoryTotals = Object.entries(
         activeSubscriptions.reduce((map, item) => {
           const category = item.category || "订阅";
@@ -1112,11 +1146,17 @@ export function createStore() {
         nextThirtyDaysTotal: forecast.nextThirtyDaysTotal,
         upcoming: subscriptions.filter((item) => item.daysUntilRenewal !== null && item.daysUntilRenewal >= 0 && item.daysUntilRenewal <= 30),
         urgent: subscriptions.filter((item) => item.level === "urgent" || item.level === "expired"),
+        expired: subscriptions.filter((item) => item.level === "expired"),
+        dueToday: subscriptions.filter((item) => item.daysUntilRenewal === 0),
         autoRenewing: subscriptions.filter((item) => item.autoRenew && item.status !== "cancelled"),
+        manualRenewing: subscriptions.filter((item) => !item.autoRenew && item.status !== "cancelled"),
         cancellable: subscriptions.filter((item) => item.advice.level === "danger" || item.advice.label.includes("取消")),
         highCost: subscriptions.filter((item) => Number(item.monthlyCost || 0) >= 100),
         reviewQueue: subscriptions.filter((item) => item.status !== "cancelled" && item.review.reasons.length > 0),
         categoryTotals,
+        ownerTotals: buildTotals(activeSubscriptions, (item) => item.owner || item.payer || "家庭账户"),
+        paymentTotals: buildTotals(activeSubscriptions, (item) => item.paymentMethod || "未指定"),
+        statusTotals: buildTotals(subscriptions, (item) => item.status || "active"),
       };
     },
     getMonthlyBillStats(month) {

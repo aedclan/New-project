@@ -4,6 +4,9 @@ export const RECENT_VIEWS_KEY = "personal-hub-recent-views";
 export const UI_STATE_KEY = "personal-hub-ui-state";
 export const SUBSCRIPTION_NOTIFICATION_SETTINGS_KEY = "personal-hub-subscription-notification-settings";
 export const SUBSCRIPTION_NOTIFICATION_LOG_KEY = "personal-hub-subscription-notification-log";
+export const SERVER_SYNC_TOKEN_KEY = "personal-hub-server-sync-token";
+export const SERVER_SYNC_AUTO_KEY = "personal-hub-server-sync-auto";
+export const SERVER_SYNC_LAST_PUSH_KEY = "personal-hub-server-sync-last-push";
 
 export const DEFAULT_SORT_BY_PAGE = {
   dashboard: "updated-desc",
