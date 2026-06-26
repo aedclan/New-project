@@ -21,7 +21,14 @@ const mimeTypes = {
 };
 
 function resolveRequestPath(url) {
-  const cleanPath = decodeURIComponent(new URL(url, `http://${host}:${port}`).pathname);
+  let cleanPath = "/";
+  try {
+    const requestUrl = String(url || "/").replace(/^\/{2,}/, "/");
+    cleanPath = decodeURIComponent(new URL(requestUrl, "http://localhost").pathname);
+  } catch {
+    return null;
+  }
+
   const requested = cleanPath === "/" ? "/index.html" : cleanPath;
   const filePath = normalize(join(root, requested));
 
