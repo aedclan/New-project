@@ -41,42 +41,6 @@ body {
     "Microsoft YaHei", sans-serif;
 }
 
-.app-ready .startup-notice {
-  display: none !important;
-}
-
-.startup-notice {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(15, 23, 42, 0.2);
-  backdrop-filter: blur(4px);
-}
-
-.startup-notice__card {
-  width: min(560px, calc(100vw - 32px));
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  padding: 20px 22px;
-}
-
-.startup-notice__card strong {
-  display: block;
-  margin-bottom: 10px;
-  font-size: 18px;
-}
-
-.startup-notice__card p {
-  margin-bottom: 8px;
-  color: var(--muted);
-  line-height: 1.6;
-}
-
 button,
 input,
 select,

@@ -48,7 +48,6 @@ if (versionBadge) {
 }
 
 document.body.classList.add("app-ready");
-document.querySelector("#startupNotice")?.setAttribute("hidden", "");
 initializeTheme();
 bindEvents(app, elements, renderer, formController, authController, billExcelController);
 renderer.render();
