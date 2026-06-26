@@ -805,6 +805,12 @@ export function bindEvents(app, elements, renderer, formController, authControll
       return;
     }
 
+    if (event.target.id === "importJsonButton") {
+      if (!(await ensureAuth())) return;
+      document.querySelector("#importJsonFile")?.click();
+      return;
+    }
+
     if (event.target.id === "downloadBillExcelTemplate") {
       if (!(await ensureAuth())) return;
       billExcelController.downloadTemplate();
@@ -989,6 +995,39 @@ export function bindEvents(app, elements, renderer, formController, authControll
         defaultPayer: document.querySelector("#financeImportPayer")?.value || "家庭账户",
       });
       event.target.value = "";
+      return;
+    }
+
+    if (event.target.id === "importJsonFile") {
+      if (!(await ensureAuth())) {
+        event.target.value = "";
+        return;
+      }
+      const [file] = event.target.files || [];
+      event.target.value = "";
+      if (!file) return;
+      try {
+        const payload = JSON.parse(await file.text());
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          window.alert("JSON 格式不正确：根内容必须是对象。");
+          return;
+        }
+        const importPayload = payload && typeof payload.data === "object" && !Array.isArray(payload.data) ? payload.data : payload;
+        const summary = formatHubDataSummary(summarizeHubData(importPayload));
+        const confirmed = window.confirm(`确定导入这份 JSON 数据吗？当前页面数据会被覆盖。\n\n导入内容：${summary}`);
+        if (!confirmed) return;
+        const imported = app.store.importData(importPayload);
+        if (!imported) {
+          window.alert("导入失败：JSON 数据结构不符合要求。");
+          return;
+        }
+        renderer.closeDrawer();
+        renderer.render();
+        app.autoServerSync?.schedule(100);
+        window.alert("JSON 已导入。若当前为服务器账号，数据会自动同步到当前账号。");
+      } catch (error) {
+        window.alert(error.message || "JSON 文件读取失败。");
+      }
       return;
     }
 

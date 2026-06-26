@@ -3218,6 +3218,7 @@ function renderSettings(elements, data, ui, authController) {
   const serverSyncState = loadServerSyncState();
   const currentUser = authController?.user || null;
   const isServerAccount = Boolean(authController?.isServerAuthenticated);
+  const isAdmin = Boolean(authController?.isAdmin);
   const accountName = isServerAccount ? currentUser?.username || "已登录账号" : authController?.isAuthenticated ? "本地演示账号" : "未登录";
   const accountRole = isServerAccount ? currentUser?.role || "user" : authController?.isAuthenticated ? "local" : "readonly";
   const syncScope = isServerAccount ? `账号独立数据：user-${currentUser?.id || ""}.json` : "仅本地浏览器数据";
@@ -3248,9 +3249,13 @@ function renderSettings(elements, data, ui, authController) {
         <article class="settings-action-card">
           <div>
             <strong>完整备份</strong>
-            <span>导出当前浏览器内的全部数据，适合更新前留档。</span>
+            <span>导出或导入当前账号的完整 JSON 数据，适合更新前留档和迁移。</span>
           </div>
-          <button class="ghost-button" id="exportData" type="button">导出 JSON</button>
+          <div class="settings-inline-actions">
+            <button class="ghost-button" id="exportData" type="button">导出 JSON</button>
+            <button class="ghost-button" id="importJsonButton" type="button">导入 JSON</button>
+            <input id="importJsonFile" type="file" accept="application/json,.json" hidden />
+          </div>
         </article>
         <article class="settings-action-card">
           <div>
@@ -3313,16 +3318,22 @@ function renderSettings(elements, data, ui, authController) {
       </div>
     </section>
 
-    <section class="panel settings-section">
-      <div class="panel-head">
-        <h2>账号与多用户</h2>
-        <span class="results-count">注册 / 用户 / 数据隔离</span>
-      </div>
-      <p class="panel-copy">用于管理员查看服务器用户、禁用账号、重置密码，并确认每个用户是否已有独立数据文件。</p>
-      <div class="settings-action-row">
-        <button class="ghost-button" id="openUserManagement" type="button">打开用户管理</button>
-      </div>
-    </section>
+    ${
+      isAdmin
+        ? `
+          <section class="panel settings-section">
+            <div class="panel-head">
+              <h2>账号与多用户</h2>
+              <span class="results-count">注册 / 用户 / 数据隔离</span>
+            </div>
+            <p class="panel-copy">用于管理员查看服务器用户、禁用账号、重置密码，并确认每个用户是否已有独立数据文件。</p>
+            <div class="settings-action-row">
+              <button class="ghost-button" id="openUserManagement" type="button">打开用户管理</button>
+            </div>
+          </section>
+        `
+        : ""
+    }
 
     <section class="panel settings-section">
       <div class="panel-head">

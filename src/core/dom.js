@@ -4,6 +4,7 @@ export function getElements() {
     pageTitle: document.querySelector("#pageTitle"),
     pageEyebrow: document.querySelector("#pageEyebrow"),
     filterRow: document.querySelector("#filterRow"),
+    syncBanner: document.querySelector("#syncBanner"),
     navList: document.querySelector("#navList"),
     mobileTabs: document.querySelector("#mobileTabs"),
     globalSearch: document.querySelector("#globalSearch"),
@@ -19,5 +20,7 @@ export function getElements() {
     entryForm: document.querySelector("#entryForm"),
     sidebarProgress: document.querySelector("#sidebarProgress"),
     sidebarProgressBar: document.querySelector("#sidebarProgressBar"),
+    sidebarAccountName: document.querySelector("#sidebarAccountName"),
+    sidebarAccountStatus: document.querySelector("#sidebarAccountStatus"),
   };
 }

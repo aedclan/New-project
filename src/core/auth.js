@@ -34,6 +34,14 @@ export function createAuthController(elements) {
   function renderAuthState() {
     document.body.classList.toggle("is-locked", !state.isAuthenticated);
     authButton.textContent = state.isAuthenticated ? "退出" : "登录";
+    const accountName = state.isAuthenticated ? state.user?.username || DEMO_USER.username : "未登录";
+    const accountStatus = state.isAuthenticated
+      ? state.authMode === "server"
+        ? `${state.user?.role || "user"} · 服务器实时同步`
+        : "local · 本地演示账号"
+      : "浏览模式";
+    if (elements.sidebarAccountName) elements.sidebarAccountName.textContent = accountName;
+    if (elements.sidebarAccountStatus) elements.sidebarAccountStatus.textContent = accountStatus;
     elements.modal.querySelector("#entryFormHint").textContent = state.isAuthenticated
       ? state.authMode === "server"
         ? "当前已通过服务器账号登录，数据会按账号隔离，并可同步到服务器。"
@@ -240,6 +248,9 @@ export function createAuthController(elements) {
     },
     get authMode() {
       return state.authMode;
+    },
+    get isAdmin() {
+      return state.isAuthenticated && state.authMode === "server" && state.user?.role === "admin";
     },
     requireAuth,
     ensureAuth,

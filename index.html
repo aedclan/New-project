@@ -29,6 +29,12 @@
             <span id="sidebarProgressBar"></span>
           </div>
         </section>
+
+        <section class="sidebar-card account-card" id="sidebarAccountCard">
+          <span class="eyebrow">当前账号</span>
+          <strong id="sidebarAccountName">未登录</strong>
+          <small id="sidebarAccountStatus">浏览模式</small>
+        </section>
       </aside>
 
       <main class="workspace">
@@ -51,6 +57,8 @@
           </div>
           <div class="filter-row" id="filterRow"></div>
         </section>
+
+        <div class="sync-banner" id="syncBanner" hidden>正在读取当前账号的服务器数据...</div>
 
         <section class="content-area" id="contentArea"></section>
       </main>
