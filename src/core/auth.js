@@ -216,7 +216,6 @@ export function createAuthController(elements) {
 
   setFormMode("login");
   renderAuthState();
-  refreshServerSession({ silent: true });
 
   window.addEventListener("focus", () => {
     if (state.serverConfigured || state.authMode === "server") {

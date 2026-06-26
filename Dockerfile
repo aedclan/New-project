@@ -8,7 +8,6 @@ ENV PORT=5173
 
 COPY package.json ./
 COPY index.html styles.css ./
-COPY assets ./assets
 COPY scripts ./scripts
 COPY src ./src
 

@@ -69,3 +69,16 @@ initializeTheme();
 bindEvents(app, elements, renderer, formController, authController, billExcelController);
 renderer.render();
 runBrowserSubscriptionNotifications(app.store.getSubscriptionsOverview().items);
+
+authController.refreshServerSession({ silent: true }).then(async (isAuthenticated) => {
+  if (!isAuthenticated || !authController.isServerAuthenticated) return;
+  try {
+    const result = await pullServerData();
+    if (!result.data) return;
+    app.store.importData(result.data);
+    renderer.render();
+    console.info(`Personal Hub server data restored on startup: ${result.savedAt || "unknown time"}`);
+  } catch (error) {
+    console.warn(error.message || "Failed to restore server data on startup.");
+  }
+});
