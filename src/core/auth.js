@@ -27,6 +27,10 @@ export function createAuthController(elements) {
     window.dispatchEvent(new CustomEvent("personalHub:serverLogin", { detail: { user: state.user } }));
   }
 
+  function notifyServerLogout() {
+    window.dispatchEvent(new CustomEvent("personalHub:serverLogout"));
+  }
+
   function renderAuthState() {
     document.body.classList.toggle("is-locked", !state.isAuthenticated);
     authButton.textContent = state.isAuthenticated ? "退出" : "登录";
@@ -80,6 +84,7 @@ export function createAuthController(elements) {
     state.authMode = "local";
     localStorage.removeItem(AUTH_SESSION_KEY);
     renderAuthState();
+    notifyServerLogout();
   }
 
   function requireAuth() {
@@ -229,6 +234,12 @@ export function createAuthController(elements) {
     },
     get isServerAuthenticated() {
       return state.isAuthenticated && state.authMode === "server";
+    },
+    get user() {
+      return state.user ? { ...state.user } : null;
+    },
+    get authMode() {
+      return state.authMode;
     },
     requireAuth,
     ensureAuth,

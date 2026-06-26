@@ -5,6 +5,7 @@ import { createAutoServerSync } from "./core/auto-server-sync.js";
 import { createAuthController } from "./core/auth.js";
 import { bindEvents, initializeTheme } from "./core/events.js";
 import { createFormController } from "./core/form-controller.js";
+import { createRealtimeSync } from "./core/realtime-sync.js";
 import { runBrowserSubscriptionNotifications } from "./core/subscription-notifications.js";
 import { pullServerData } from "./core/server-sync.js";
 import { createStore } from "./core/store.js";
@@ -42,9 +43,12 @@ const elements = getElements();
 const renderer = createRenderer(app, elements);
 const formController = createFormController(elements);
 const authController = createAuthController(elements);
+app.authController = authController;
 const billExcelController = createBillExcelController(app, renderer);
 const autoServerSync = createAutoServerSync(app, authController);
+const realtimeSync = createRealtimeSync(app, authController, renderer);
 app.autoServerSync = autoServerSync;
+app.realtimeSync = realtimeSync;
 app.store.setChangeHandler(() => autoServerSync.schedule());
 
 window.addEventListener("personalHub:serverLogin", async () => {
@@ -53,10 +57,15 @@ window.addEventListener("personalHub:serverLogin", async () => {
     if (!result.data) return;
     app.store.importData(result.data);
     renderer.render();
+    realtimeSync.refreshConnection();
     console.info(`Personal Hub server data restored: ${result.savedAt || "unknown time"}`);
   } catch (error) {
     window.alert(error.message || "登录成功，但自动读取服务器数据失败。");
   }
+});
+
+window.addEventListener("personalHub:serverLogout", () => {
+  realtimeSync.disconnect();
 });
 
 const versionBadge = document.querySelector("#appVersionBadge");
@@ -77,6 +86,7 @@ authController.refreshServerSession({ silent: true }).then(async (isAuthenticate
     if (!result.data) return;
     app.store.importData(result.data);
     renderer.render();
+    realtimeSync.refreshConnection();
     console.info(`Personal Hub server data restored on startup: ${result.savedAt || "unknown time"}`);
   } catch (error) {
     console.warn(error.message || "Failed to restore server data on startup.");

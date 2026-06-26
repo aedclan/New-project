@@ -110,6 +110,7 @@ const renderer = readFileSync("src/views/renderer.js", "utf8");
 const constants = readFileSync("src/config/constants.js", "utf8");
 const serverSync = readFileSync("src/core/server-sync.js", "utf8");
 const autoServerSync = readFileSync("src/core/auto-server-sync.js", "utf8");
+const realtimeSync = readFileSync("src/core/realtime-sync.js", "utf8");
 const devServer = readFileSync("scripts/dev-server.mjs", "utf8");
 const persistentDataService = readFileSync("scripts/persistent-data-service.mjs", "utf8");
 const backupDataScript = readFileSync("scripts/backup-persistent-data.mjs", "utf8");
@@ -302,6 +303,7 @@ const serverSyncSnippets = [
   "pullServerData",
   "handlePersistentDataRequest",
   "/api/data/status",
+  "/api/data/events",
   "/api/data",
   "PERSONAL_HUB_SYNC_TOKEN",
   "PERSONAL_HUB_DATA_FILE",
@@ -321,6 +323,9 @@ const serverSyncSnippets = [
   "SERVER_SYNC_AUTO_KEY",
   "SERVER_SYNC_LAST_PUSH_KEY",
   "createAutoServerSync",
+  "createRealtimeSync",
+  "EventSource",
+  "data-updated",
   "mergeHubData",
   "summarizeHubData",
   "formatHubDataSummary",
@@ -332,6 +337,7 @@ const missingServerSyncSnippets = serverSyncSnippets.filter(
     !constants.includes(snippet) &&
     !serverSync.includes(snippet) &&
     !autoServerSync.includes(snippet) &&
+    !realtimeSync.includes(snippet) &&
     !events.includes(snippet) &&
     !renderer.includes(snippet) &&
     !styles.includes(snippet) &&

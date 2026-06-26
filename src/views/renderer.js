@@ -3212,10 +3212,15 @@ function renderAnalytics(elements, data, ui) {
   `;
 }
 
-function renderSettings(elements, data, ui) {
+function renderSettings(elements, data, ui, authController) {
   renderControls(elements, data, ui, "settings");
   const notificationSettings = loadSubscriptionNotificationSettings();
   const serverSyncState = loadServerSyncState();
+  const currentUser = authController?.user || null;
+  const isServerAccount = Boolean(authController?.isServerAuthenticated);
+  const accountName = isServerAccount ? currentUser?.username || "已登录账号" : authController?.isAuthenticated ? "本地演示账号" : "未登录";
+  const accountRole = isServerAccount ? currentUser?.role || "user" : authController?.isAuthenticated ? "local" : "readonly";
+  const syncScope = isServerAccount ? `账号独立数据：user-${currentUser?.id || ""}.json` : "仅本地浏览器数据";
   const moduleStats = [
     ["生活收支", (data.bills || []).length, "可单独清空"],
     ["订阅", (data.subscriptions || []).length, "到期提醒"],
@@ -3274,19 +3279,30 @@ function renderSettings(elements, data, ui) {
     <section class="panel settings-section server-sync-panel">
       <div class="panel-head">
         <h2>服务器数据</h2>
-        <span class="results-count">实时同步 / 恢复 / 备份</span>
+        <span class="results-count">实时推送 / 恢复 / 备份</span>
       </div>
-      <p class="panel-copy">登录服务器账号后，数据按账号保存到 VPS。这里保留同步状态和故障恢复入口，日常使用不需要填写密钥或手动保存。</p>
+      <p class="panel-copy">登录服务器账号后，数据按账号保存到 VPS。一个浏览器保存后，服务器会实时通知同账号的其他浏览器自动拉取最新数据。</p>
       <div class="server-sync-grid server-sync-grid--compact">
         <article class="server-sync-status-card">
-          <span>同步状态</span>
-          <strong>${serverSyncState.lastPushedAt ? "最近已保存" : "等待首次同步"}</strong>
-          <em>${serverSyncState.lastPushedAt ? `最近同步：${escapeHtml(serverSyncState.lastPushedAt)}` : "登录后编辑数据会自动保存；如网络异常，可使用立即同步。"}</em>
+          <span>当前账号</span>
+          <strong>${escapeHtml(accountName)}</strong>
+          <em>${escapeHtml(accountRole)} · ${escapeHtml(syncScope)}</em>
         </article>
         <article class="server-sync-status-card">
-          <span>恢复策略</span>
-          <strong>服务器为主，本地可备份</strong>
-          <em>从服务器恢复会覆盖当前浏览器数据，执行前建议先导出 JSON。</em>
+          <span>实时同步</span>
+          <strong>${isServerAccount ? "已开启实时推送" : "未使用服务器账号"}</strong>
+          <em>${
+            isServerAccount
+              ? serverSyncState.lastPushedAt
+                ? `最近同步：${escapeHtml(serverSyncState.lastPushedAt)}`
+                : "登录后会自动拉取该账号数据，编辑后自动保存，并推送给同账号其他浏览器。"
+              : "请登录服务器账号后再使用跨设备同步。"
+          }</em>
+        </article>
+        <article class="server-sync-status-card">
+          <span>数据归属</span>
+          <strong>${isServerAccount ? "按账号隔离同步" : "未连接账号数据"}</strong>
+          <em>${isServerAccount ? "当前操作只读写当前登录账号的数据文件。" : "本地演示数据不会同步到其他设备。"}</em>
         </article>
       </div>
       <div class="settings-action-row">
@@ -3798,7 +3814,7 @@ export function createRenderer(app, elements) {
         collections: () => renderCollections(elements, data, app.ui, app.store),
         favorites: () => renderFavorites(elements, data, app.ui),
         analytics: () => renderAnalytics(elements, data, app.ui),
-        settings: () => renderSettings(elements, data, app.ui),
+        settings: () => renderSettings(elements, data, app.ui, app.authController),
         search: () => renderSearchResults(elements, data, app.ui),
       };
 

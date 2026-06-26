@@ -863,7 +863,8 @@ export function bindEvents(app, elements, renderer, formController, authControll
         const configuredText = result.configured ? "服务器同步可用" : "服务器同步未配置";
         const dataText = result.hasData ? "服务器已有数据" : "服务器暂无数据";
         const userText = result.user?.username ? `当前账号：${result.user.username}。` : "";
-        window.alert(`${configuredText}，${dataText}。${userText}`);
+        const fileText = result.dataFile ? `数据文件：${result.dataFile}` : "";
+        window.alert(`${configuredText}，${dataText}。${userText}${fileText}`);
       } catch (error) {
         window.alert(error.message);
       }
