@@ -3721,6 +3721,68 @@ function renderFavorInsightDetail(elements, data, filterType, filterValue) {
   elements.contactDetailModal.showModal();
 }
 
+const drawerFieldLabels = {
+  status: "状态",
+  priority: "优先级",
+  dueDate: "截止日期",
+  category: "分类",
+  type: "类型",
+  amount: "金额",
+  date: "日期",
+  source: "来源",
+  payer: "承担人",
+  familyMember: "家庭成员",
+  fixedExpenseType: "固定支出",
+  mortgageDueDay: "房贷扣款日",
+  mortgageRemainingTerms: "剩余期数",
+  pinned: "置顶",
+  noteType: "笔记类型",
+  sourceUrl: "来源链接",
+  content: "内容",
+  progress: "进度",
+};
+
+const drawerHiddenFields = new Set([
+  "id",
+  "title",
+  "description",
+  "content",
+  "tags",
+  "entryType",
+  "projectId",
+  "isFavorite",
+  "createdAt",
+  "updatedAt",
+  "originalType",
+  "linkedBillId",
+  "sourceUrl",
+]);
+
+const drawerValueLabels = {
+  noteType: {
+    note: "普通笔记",
+    link: "链接收录",
+    idea: "碎片想法",
+  },
+};
+
+function formatDrawerValue(value) {
+  if (Array.isArray(value)) return value.join(", ");
+  if (typeof value === "boolean") return value ? "是" : "否";
+  return value;
+}
+
+function drawerAttributeTags(item) {
+  const tags = Object.entries(item)
+    .filter(([key, value]) => !drawerHiddenFields.has(key) && value !== "" && value !== null && value !== undefined)
+    .slice(0, 10)
+    .map(([key, value]) => {
+      const formatted = drawerValueLabels[key]?.[value] || formatDrawerValue(value);
+      return `<span class="tag">${escapeHtml(drawerFieldLabels[key] || key)}：${escapeHtml(formatted)}</span>`;
+    });
+  return tags.join("") || '<span class="tag">暂无属性</span>';
+}
+
 function renderDrawer(elements, item, type, projectOverview = null, data = null) {
   const meta = typeMeta[type];
   const noteDetails =
@@ -3776,11 +3838,7 @@ function renderDrawer(elements, item, type, projectOverview = null, data = null)
     <div class="detail-section">
       <h3>属性</h3>
       <div class="tag-row">
-        ${Object.entries(item)
-          .filter(([key]) => !["id", "title", "description", "tags", "entryType"].includes(key))
-          .slice(0, 10)
-          .map(([key, value]) => `<span class="tag">${escapeHtml(key)}: ${escapeHtml(Array.isArray(value) ? value.join(", ") : value)}</span>`)
-          .join("")}
+        ${drawerAttributeTags(item)}
       </div>
     </div>
     <div class="detail-section">
