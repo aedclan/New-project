@@ -42,7 +42,7 @@ body {
 }
 
 .app-ready .startup-notice {
-  display: none;
+  display: none !important;
 }
 
 .startup-notice {
