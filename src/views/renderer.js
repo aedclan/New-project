@@ -3273,30 +3273,27 @@ function renderSettings(elements, data, ui) {
 
     <section class="panel settings-section server-sync-panel">
       <div class="panel-head">
-        <h2>服务器数据同步</h2>
-        <span class="results-count">V0.25 数据持久化底座</span>
+        <h2>服务器数据</h2>
+        <span class="results-count">实时同步 / 恢复 / 备份</span>
       </div>
-      <p class="panel-copy">登录服务器账号后会自动从 VPS 读取数据；同步密钥保留为备用方式。手动读取会覆盖当前浏览器数据，执行前建议先导出 JSON。</p>
-      <div class="server-sync-grid">
-        <label>
-          同步密钥
-          <input id="serverSyncToken" type="password" placeholder="${serverSyncState.hasToken ? serverSyncState.maskedToken : "输入 VPS 环境变量 PERSONAL_HUB_SYNC_TOKEN"}" autocomplete="off" />
-        </label>
+      <p class="panel-copy">登录服务器账号后，数据按账号保存到 VPS。这里保留同步状态和故障恢复入口，日常使用不需要填写密钥或手动保存。</p>
+      <div class="server-sync-grid server-sync-grid--compact">
         <article class="server-sync-status-card">
-          <span>当前浏览器</span>
-          <strong>${serverSyncState.hasToken ? "已保存备用密钥" : "优先使用登录会话"}</strong>
-          <em>${serverSyncState.lastPushedAt ? `最近保存：${escapeHtml(serverSyncState.lastPushedAt)}` : "登录账号可直接同步；密钥只作为未登录时的备用口令。"}</em>
+          <span>同步状态</span>
+          <strong>${serverSyncState.lastPushedAt ? "最近已保存" : "等待首次同步"}</strong>
+          <em>${serverSyncState.lastPushedAt ? `最近同步：${escapeHtml(serverSyncState.lastPushedAt)}` : "登录后编辑数据会自动保存；如网络异常，可使用立即同步。"}</em>
+        </article>
+        <article class="server-sync-status-card">
+          <span>恢复策略</span>
+          <strong>服务器为主，本地可备份</strong>
+          <em>从服务器恢复会覆盖当前浏览器数据，执行前建议先导出 JSON。</em>
         </article>
       </div>
-      <label class="setting-toggle server-sync-auto-toggle">
-        <input id="serverSyncAutoEnabled" type="checkbox" ${serverSyncState.autoEnabled ? "checked" : ""} />
-        <span>自动保存到服务器</span>
-      </label>
       <div class="settings-action-row">
-        <button class="ghost-button" id="checkServerSyncStatus" type="button">检查服务器</button>
-        <button class="ghost-button" id="pullServerData" type="button">从服务器读取</button>
-        <button class="ghost-button" id="mergeServerData" type="button">合并服务器数据</button>
-        <button class="primary-button" id="pushServerData" type="button">保存到服务器</button>
+        <button class="primary-button" id="pushServerData" type="button">立即同步</button>
+        <button class="ghost-button" id="checkServerSyncStatus" type="button">检查状态</button>
+        <button class="ghost-button" id="pullServerData" type="button">从服务器恢复</button>
+        <button class="ghost-button" id="exportServerBackup" type="button">导出备份 JSON</button>
       </div>
     </section>
 

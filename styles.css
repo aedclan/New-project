@@ -3653,6 +3653,10 @@ h2 {
   align-items: stretch;
 }
 
+.server-sync-grid--compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .server-sync-status-card {
   border: 1px solid var(--line);
   border-radius: 8px;

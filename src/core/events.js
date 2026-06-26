@@ -8,13 +8,10 @@ import {
   saveSubscriptionNotificationSettings,
 } from "./subscription-notifications.js";
 import {
-  buildHubDataMergeReport,
   checkServerSyncStatus,
   formatHubDataSummary,
-  mergeHubData,
   pullServerData,
   pushServerData,
-  saveServerSyncAutoEnabled,
   summarizeHubData,
 } from "./server-sync.js";
 import { listServerUsers, migrateServerUserData, resetServerUserPassword, updateServerUserStatus } from "./server-auth.js";
@@ -796,7 +793,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
       return;
     }
 
-    if (event.target.id === "exportData") {
+    if (event.target.id === "exportData" || event.target.id === "exportServerBackup") {
       if (!(await ensureAuth())) return;
       const blob = new Blob([JSON.stringify(app.store.exportData(), null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -863,9 +860,10 @@ export function bindEvents(app, elements, renderer, formController, authControll
       if (!(await ensureAuth())) return;
       try {
         const result = await checkServerSyncStatus();
-        const configuredText = result.configured ? "已配置同步密钥" : "未配置同步密钥";
+        const configuredText = result.configured ? "服务器同步可用" : "服务器同步未配置";
         const dataText = result.hasData ? "服务器已有数据" : "服务器暂无数据";
-        window.alert(`${configuredText}，${dataText}。`);
+        const userText = result.user?.username ? `当前账号：${result.user.username}。` : "";
+        window.alert(`${configuredText}，${dataText}。${userText}`);
       } catch (error) {
         window.alert(error.message);
       }
@@ -874,13 +872,12 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     if (event.target.id === "pushServerData") {
       if (!(await ensureAuth())) return;
-      const token = document.querySelector("#serverSyncToken")?.value || "";
       const localSummary = formatHubDataSummary(summarizeHubData(app.store.exportData()));
-      const confirmed = window.confirm(`确定把当前浏览器数据保存到服务器吗？服务器上的旧数据会被覆盖。\n\n当前浏览器：${localSummary}`);
+      const confirmed = window.confirm(`确定立即把当前浏览器数据同步到服务器吗？服务器上的旧数据会被覆盖。\n\n当前浏览器：${localSummary}`);
       if (!confirmed) return;
       try {
-        const result = await pushServerData(app.store.exportData(), token);
-        window.alert(`服务器数据已保存：${result.savedAt || "刚刚"}`);
+        const result = await pushServerData(app.store.exportData());
+        window.alert(`服务器数据已同步：${result.savedAt || "刚刚"}`);
         renderer.render();
       } catch (error) {
         window.alert(error.message);
@@ -890,12 +887,11 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     if (event.target.id === "pullServerData") {
       if (!(await ensureAuth())) return;
-      const token = document.querySelector("#serverSyncToken")?.value || "";
       const localSummary = formatHubDataSummary(summarizeHubData(app.store.exportData()));
       const confirmed = window.confirm(`确定从服务器读取数据并覆盖当前浏览器数据吗？建议先导出 JSON 备份。\n\n当前浏览器：${localSummary}`);
       if (!confirmed) return;
       try {
-        const result = await pullServerData(token);
+        const result = await pullServerData();
         if (!result.data) {
           window.alert("服务器暂无可恢复的数据。");
           return;
@@ -903,33 +899,6 @@ export function bindEvents(app, elements, renderer, formController, authControll
         app.store.importData(result.data);
         renderer.render();
         window.alert(`已从服务器恢复数据：${result.savedAt || "未知时间"}`);
-      } catch (error) {
-        window.alert(error.message);
-      }
-      return;
-    }
-
-    if (event.target.id === "mergeServerData") {
-      if (!(await ensureAuth())) return;
-      const token = document.querySelector("#serverSyncToken")?.value || "";
-      try {
-        const result = await pullServerData(token);
-        if (!result.data) {
-          window.alert("服务器暂无可合并的数据。");
-          return;
-        }
-        const localData = app.store.exportData();
-        const mergedData = mergeHubData(localData, result.data);
-        const localSummary = formatHubDataSummary(summarizeHubData(localData));
-        const serverSummary = formatHubDataSummary(summarizeHubData(result.data));
-        const mergedSummary = formatHubDataSummary(summarizeHubData(mergedData));
-        const mergeReport = buildHubDataMergeReport(localData, result.data);
-        const confirmed = await showMergePreviewDialog(mergeReport, { localSummary, serverSummary, mergedSummary });
-        if (!confirmed) return;
-        app.store.importData(mergedData);
-        await pushServerData(mergedData, token);
-        renderer.render();
-        window.alert("服务器数据已合并。");
       } catch (error) {
         window.alert(error.message);
       }
@@ -1024,18 +993,6 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     if (event.target.id === "favoriteOnlyToggle") {
       app.ui.filters.favoriteOnly = event.target.checked;
-      shouldRender = true;
-    }
-
-    if (event.target.id === "serverSyncAutoEnabled") {
-      if (!(await ensureAuth())) {
-        event.target.checked = !event.target.checked;
-        return;
-      }
-      saveServerSyncAutoEnabled(event.target.checked);
-      if (event.target.checked) {
-        app.autoServerSync?.schedule(100);
-      }
       shouldRender = true;
     }
 
