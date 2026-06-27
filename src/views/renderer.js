@@ -506,18 +506,18 @@ function renderNav(elements, ui) {
 }
 
 function updateProgress(elements, data) {
+  if (!elements.sidebarProgress || !elements.sidebarProgressBar) return;
   const done = data.tasks.filter((task) => task.status === "已完成").length;
   const progress = Math.round((done / Math.max(data.tasks.length, 1)) * 100);
   elements.sidebarProgress.textContent = `${progress}%`;
   elements.sidebarProgressBar.style.width = `${progress}%`;
 }
 
-function renderDashboard(elements, data, ui, recentViews) {
+function renderDashboard(elements, data, ui, recentViews, store) {
   renderControls(elements, data, ui, "dashboard");
 
   const tasks = filteredItems(data, ui, "tasks");
   const notes = filteredItems(data, ui, "notes").slice(0, 3);
-  const collections = filteredItems(data, ui, "collections").slice(0, 3);
   const bills = filteredItems(data, { ...ui, activeChip: "all" }, "bills");
   const income = bills.filter((bill) => bill.type === "收入").reduce((sum, bill) => sum + Number(bill.amount || 0), 0);
   const expense = bills.filter((bill) => bill.type === "支出").reduce((sum, bill) => sum + Number(bill.amount || 0), 0);
@@ -525,13 +525,48 @@ function renderDashboard(elements, data, ui, recentViews) {
   const progress = Math.round((doneTasks / Math.max(data.tasks.length, 1)) * 100);
   const notificationSettings = loadSubscriptionNotificationSettings();
   const subscriptionSummary = getSubscriptionReminderSummary(data.subscriptions || []);
+  const subscriptionsOverview = store?.getSubscriptionsOverview?.() || { estimatedMonthlyCost: 0, upcoming: [], urgent: [] };
+  const favorStats = store?.getFavorStats?.() || { received: 0, given: 0, balance: 0, totalContacts: 0 };
+  const pendingTasks = tasks.filter((task) => task.status !== "已完成");
+  const todayTasks = pendingTasks.filter((task) => isDueToday(task)).slice(0, 4);
+  const overdueTasks = pendingTasks.filter(isOverdue);
+  const balanceCopy =
+    favorStats.balance > 0
+      ? `别人差我 ${formatCurrency(favorStats.balance)}`
+      : favorStats.balance < 0
+        ? `我差别人 ${formatCurrency(Math.abs(favorStats.balance))}`
+        : "往来差额持平";
 
   elements.contentArea.innerHTML = `
-    <div class="stats-grid subscription-stats-grid">
-      ${statCard("待办事项", tasks.filter((task) => task.status !== "已完成").length, "今天要推进")}
-      ${statCard("本月收入", formatCurrency(income), "已记录")}
-      ${statCard("本月支出", formatCurrency(expense), "预算关注")}
-      ${statCard("订阅提醒", subscriptionSummary.total, subscriptionSummary.text)}
+    <section class="opera-dashboard-hero">
+      <div>
+        <span class="eyebrow">Personal Command Center</span>
+        <h2>今天先看这些</h2>
+        <p>把账单、订阅、人情、事项和笔记压缩成一屏摘要，点击任意卡片进入对应工作区。</p>
+      </div>
+      <button class="primary-button" id="dashboardQuickAdd" type="button">新增记录</button>
+    </section>
+    <div class="opera-metric-grid">
+      <button class="opera-metric-card" data-page-jump="tasks" type="button">
+        <span>待办事项</span>
+        <strong>${pendingTasks.length}</strong>
+        <small>${overdueTasks.length ? `${overdueTasks.length} 项逾期` : `完成率 ${progress}%`}</small>
+      </button>
+      <button class="opera-metric-card" data-page-jump="bills" type="button">
+        <span>本月支出</span>
+        <strong>${formatCurrency(expense)}</strong>
+        <small>收入 ${formatCurrency(income)}</small>
+      </button>
+      <button class="opera-metric-card" data-page-jump="subscriptions" type="button">
+        <span>订阅成本</span>
+        <strong>${formatCurrency(subscriptionsOverview.estimatedMonthlyCost)}</strong>
+        <small>${subscriptionsOverview.upcoming.length} 个 30 天内到期</small>
+      </button>
+      <button class="opera-metric-card" data-page-jump="favors" type="button">
+        <span>人情差额</span>
+        <strong>${formatCurrency(Math.abs(favorStats.balance || 0))}</strong>
+        <small>${balanceCopy}</small>
+      </button>
     </div>
     ${
       notificationSettings.siteEnabled && subscriptionSummary.total
@@ -549,33 +584,47 @@ function renderDashboard(elements, data, ui, recentViews) {
           </section>`
         : ""
     }
-    <div class="two-col">
-      <section class="panel">
+    <div class="opera-workbench-grid">
+      <section class="panel opera-workbench-card">
         <div class="panel-head">
-          <h2>今日事项</h2>
+          <div>
+            <span class="eyebrow">Tasks</span>
+            <h2>今日事项</h2>
+          </div>
           <button class="ghost-button" data-page-jump="tasks" type="button">查看全部</button>
         </div>
-        <div class="list-stack">${tasks.slice(0, 4).map(taskRow).join("") || emptyState("暂无事项")}</div>
+        <div class="list-stack">${(todayTasks.length ? todayTasks : pendingTasks.slice(0, 4)).map(taskRow).join("") || emptyState("暂无事项")}</div>
       </section>
-      <section class="panel">
+      <section class="panel opera-workbench-card">
         <div class="panel-head">
-          <h2>最近笔记</h2>
+          <div>
+            <span class="eyebrow">Notes</span>
+            <h2>最近笔记</h2>
+          </div>
           <button class="ghost-button" data-page-jump="notes" type="button">查看全部</button>
         </div>
         <div class="list-stack">${notes.map(noteRow).join("") || emptyState("暂无笔记")}</div>
       </section>
-    </div>
-    <div class="two-col">
-      <section class="panel">
+      <section class="panel opera-workbench-card">
         <div class="panel-head">
-          <h2>项目集</h2>
-          <button class="ghost-button" data-page-jump="collections" type="button">查看全部</button>
+          <div>
+            <span class="eyebrow">Favor Ledger</span>
+            <h2>人情往来</h2>
+          </div>
+          <button class="ghost-button" data-page-jump="favors" type="button">查看台账</button>
         </div>
-        <div class="card-grid">${collections.map((item) => contentCard(item, "collections", typeMeta.collections.label)).join("") || emptyState("暂无项目集")}</div>
+        <div class="opera-balance-strip">
+          <span>收礼 ${formatCurrency(favorStats.received)}</span>
+          <span>送礼 ${formatCurrency(favorStats.given)}</span>
+          <strong>${balanceCopy}</strong>
+        </div>
       </section>
-      <section class="panel">
+      <section class="panel opera-workbench-card">
         <div class="panel-head">
-          <h2>最近访问</h2>
+          <div>
+            <span class="eyebrow">Recent</span>
+            <h2>最近访问</h2>
+          </div>
           ${ui.searchTerm ? '<button class="ghost-button" id="openSearchPage" type="button">查看搜索结果</button>' : ""}
         </div>
         <div class="recent-list">${recentViews.map(recentViewRow).join("") || emptyState("还没有浏览记录")}</div>
@@ -3849,12 +3898,13 @@ export function createRenderer(app, elements) {
       elements.pageTitle.textContent = current.label;
       elements.pageEyebrow.textContent = current.eyebrow;
       elements.globalSearch.value = app.ui.searchTerm;
+      elements.contentArea.className = `content-area page-${current.id}`;
 
       renderNav(elements, app.ui);
       updateProgress(elements, data);
 
       const pageRenderers = {
-        dashboard: () => renderDashboard(elements, data, app.ui, recentViews),
+        dashboard: () => renderDashboard(elements, data, app.ui, recentViews, app.store),
         tasks: () => renderTasks(elements, data, app.ui),
         bills: () => renderBills(elements, data, app.ui, app.store),
         subscriptions: () => renderSubscriptions(elements, data, app.ui, app.store),

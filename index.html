@@ -22,20 +22,6 @@
 
         <nav class="nav-list" id="navList"></nav>
 
-        <section class="sidebar-card">
-          <span class="eyebrow">本周进度</span>
-          <strong id="sidebarProgress">0%</strong>
-          <div class="mini-progress">
-            <span id="sidebarProgressBar"></span>
-          </div>
-        </section>
-
-        <section class="sidebar-card account-card" id="sidebarAccountCard">
-          <span class="eyebrow">当前账号</span>
-          <strong id="sidebarAccountName">未登录</strong>
-          <small id="sidebarAccountStatus">浏览模式</small>
-          <span class="account-version-badge" id="appVersionBadge">v0.21.0</span>
-        </section>
       </aside>
 
       <main class="workspace">
@@ -45,6 +31,12 @@
             <input id="globalSearch" type="search" placeholder="搜索事项、账单、笔记、项目集..." />
           </label>
           <div class="topbar-actions">
+            <section class="topbar-account-card account-card" id="sidebarAccountCard">
+              <span class="eyebrow">当前账号</span>
+              <strong id="sidebarAccountName">未登录</strong>
+              <small id="sidebarAccountStatus">浏览模式</small>
+              <span class="account-version-badge" id="appVersionBadge">v0.25.0</span>
+            </section>
             <button class="icon-button" id="themeToggle" type="button" aria-label="切换主题">&#9680;</button>
             <button class="ghost-button" id="authButton" type="button">登录</button>
             <button class="primary-button" id="quickAddButton" type="button">+ 新增</button>

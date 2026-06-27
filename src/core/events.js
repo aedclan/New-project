@@ -228,7 +228,8 @@ function resetPageState(app, nextPage) {
 }
 
 export function initializeTheme() {
-  if (localStorage.getItem(THEME_KEY) === "dark") {
+  const savedTheme = localStorage.getItem(THEME_KEY);
+  if (savedTheme !== "light") {
     document.body.classList.add("dark");
   }
 }
@@ -815,7 +816,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
       return;
     }
 
-    if (event.target.id === "quickAddButton") {
+    if (event.target.id === "quickAddButton" || event.target.id === "dashboardQuickAdd") {
       if (!(await ensureAuth())) return;
       formController.openCreate();
       return;
