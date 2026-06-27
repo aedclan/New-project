@@ -3319,6 +3319,23 @@ function renderSettings(elements, data, ui, authController) {
     </section>
 
     ${
+      isServerAccount
+        ? `
+          <section class="panel settings-section">
+            <div class="panel-head">
+              <h2>账号安全</h2>
+              <span class="results-count">邮箱 / 密码</span>
+            </div>
+            <p class="panel-copy">当前账号：${escapeHtml(accountName)}。建议定期更新密码，修改后需要重新登录。</p>
+            <div class="settings-action-row">
+              <button class="ghost-button" id="changeOwnPassword" type="button">修改我的密码</button>
+            </div>
+          </section>
+        `
+        : ""
+    }
+
+    ${
       isAdmin
         ? `
           <section class="panel settings-section">
@@ -3459,43 +3476,6 @@ function renderSettings(elements, data, ui, authController) {
           <button class="primary-button" type="submit">保存通知设置</button>
         </div>
       </form>
-    </section>
-    <section class="panel settings-section">
-      <div class="panel-head"><h2>当前升级进度</h2></div>
-      <div class="settings-roadmap-list">
-        ${noteRow({
-          id: "roadmap-1",
-          title: "V0.22 稳定上线版",
-          description: "当前阶段：检查线上稳定性、统一 UI、清理明显错误、整理设置面板与部署前检查。",
-          category: "进行中",
-          tags: ["稳定", "上线"],
-          updatedAt: "当前推进",
-        })}
-        ${noteRow({
-          id: "roadmap-2",
-          title: "V0.23 生活收支增强版",
-          description: "下一阶段：支付宝 / 微信导入、男女双方归属、历史月份、家庭消费动向与房贷压力分析。",
-          category: "下一版本",
-          tags: ["生活收支", "规划"],
-          updatedAt: "待开发",
-        })}
-        ${noteRow({
-          id: "roadmap-3",
-          title: "V0.24 订阅管理成熟版",
-          description: "订阅到期提醒、邮件通知、年度成本、支付渠道和归属分类。",
-          category: "后续版本",
-          tags: ["订阅", "提醒"],
-          updatedAt: "待开发",
-        })}
-        ${noteRow({
-          id: "roadmap-4",
-          title: "V0.25 数据安全与真实登录版",
-          description: "真实账号、数据库持久化、Docker 数据卷、自动备份与恢复。",
-          category: "后续版本",
-          tags: ["登录", "数据库"],
-          updatedAt: "待开发",
-        })}
-      </div>
     </section>
   `;
 }

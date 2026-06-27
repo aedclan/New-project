@@ -14,7 +14,16 @@ import {
   pushServerData,
   summarizeHubData,
 } from "./server-sync.js";
-import { listServerUsers, migrateServerUserData, resetServerUserPassword, updateServerUserStatus } from "./server-auth.js";
+import {
+  changeServerPassword,
+  listServerUsers,
+  migrateServerUserData,
+  resendServerUserVerification,
+  resetServerUserPassword,
+  updateServerUserEmail,
+  updateServerUserStatus,
+  verifyServerUserEmail,
+} from "./server-auth.js";
 
 function createDefaultFilters() {
   return {
@@ -399,10 +408,13 @@ export function bindEvents(app, elements, renderer, formController, authControll
                   <article class="user-management-row ${user.disabled ? "is-disabled" : ""}">
                     <div>
                       <strong>${escapeHtml(user.email || user.username)}${user.isCurrent ? "（当前）" : ""}</strong>
-                      <span>${escapeHtml(user.role)} · ${user.disabled ? "已禁用" : "正常"} · ${user.data?.hasData ? "已有数据" : "暂无数据"}</span>
+                      <span>${escapeHtml(user.role)} · ${user.disabled ? "已禁用" : "正常"} · ${user.emailVerified ? "邮箱已验证" : "邮箱未验证"} · ${user.data?.hasData ? "已有数据" : "暂无数据"}</span>
                       <em>${escapeHtml(user.data?.legacy ? "正在兼容旧全局数据" : user.data?.dataFile || "")}</em>
                     </div>
                     <div class="user-management-actions">
+                      <button class="ghost-button" data-user-update-email="${user.id}" data-user-email="${escapeHtml(user.email || "")}" type="button">修改邮箱</button>
+                      <button class="ghost-button" data-user-resend-verification="${user.id}" ${user.email && !user.emailVerified ? "" : "disabled"} type="button">重发验证</button>
+                      <button class="ghost-button" data-user-verify-email="${user.id}" ${user.email && !user.emailVerified ? "" : "disabled"} type="button">标记已验证</button>
                       <button class="ghost-button" data-user-migrate-legacy="${user.id}" ${legacyData.hasData ? "" : "disabled"} type="button">迁移旧数据</button>
                       <button class="ghost-button" data-user-reset-password="${user.id}" type="button">重置密码</button>
                       <button class="ghost-button ${user.disabled ? "" : "danger-button"}" data-user-toggle-status="${user.id}" data-user-disabled="${user.disabled ? "false" : "true"}" ${user.isCurrent ? "disabled" : ""} type="button">
@@ -449,6 +461,43 @@ export function bindEvents(app, elements, renderer, formController, authControll
         try {
           await migrateServerUserData(migrateButton.dataset.userMigrateLegacy, { source: "legacy", overwrite: true });
           window.alert("旧数据已迁移到指定用户。");
+          await renderUsers();
+        } catch (error) {
+          window.alert(error.message);
+        }
+        return;
+      }
+      const emailButton = event.target.closest("[data-user-update-email]");
+      if (emailButton) {
+        const email = window.prompt("请输入用户邮箱：", emailButton.dataset.userEmail || "");
+        if (!email) return;
+        try {
+          await updateServerUserEmail(emailButton.dataset.userUpdateEmail, email);
+          window.alert("邮箱已更新，该用户需要重新验证邮箱并登录。");
+          await renderUsers();
+        } catch (error) {
+          window.alert(error.message);
+        }
+        return;
+      }
+      const resendButton = event.target.closest("[data-user-resend-verification]");
+      if (resendButton) {
+        try {
+          await resendServerUserVerification(resendButton.dataset.userResendVerification);
+          window.alert("验证邮件已发送。");
+          await renderUsers();
+        } catch (error) {
+          window.alert(error.message);
+        }
+        return;
+      }
+      const verifyButton = event.target.closest("[data-user-verify-email]");
+      if (verifyButton) {
+        const confirmed = window.confirm("确定手动标记该用户邮箱为已验证吗？");
+        if (!confirmed) return;
+        try {
+          await verifyServerUserEmail(verifyButton.dataset.userVerifyEmail);
+          window.alert("邮箱已标记为已验证。");
           await renderUsers();
         } catch (error) {
           window.alert(error.message);
@@ -915,6 +964,24 @@ export function bindEvents(app, elements, renderer, formController, authControll
     if (event.target.id === "openUserManagement") {
       if (!(await ensureAuth())) return;
       await showUserManagementDialog();
+      return;
+    }
+
+    if (event.target.id === "changeOwnPassword") {
+      if (!(await ensureAuth())) return;
+      const oldPassword = window.prompt("请输入当前密码：");
+      if (!oldPassword) return;
+      const newPassword = window.prompt("请输入新密码，至少 8 位：");
+      if (!newPassword) return;
+      const confirmPassword = window.prompt("请再次输入新密码：");
+      if (!confirmPassword) return;
+      try {
+        const result = await changeServerPassword(oldPassword, newPassword, confirmPassword);
+        window.alert(result.message || "密码已修改，请重新登录。");
+        window.location.reload();
+      } catch (error) {
+        window.alert(error.message || "密码修改失败。");
+      }
       return;
     }
 

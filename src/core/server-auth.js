@@ -1,4 +1,4 @@
-async function readJsonResponse(response) {
+﻿async function readJsonResponse(response) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
     const error = new Error(payload.message || `请求失败：${response.status}`);
@@ -17,12 +17,12 @@ export async function checkServerSession() {
   return readJsonResponse(response);
 }
 
-export async function loginServer(identity, password) {
+export async function loginServer(email, password) {
   const response = await fetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin",
-    body: JSON.stringify({ username: identity, email: identity, password }),
+    body: JSON.stringify({ email, username: email, password }),
   });
   return readJsonResponse(response);
 }
@@ -32,7 +32,37 @@ export async function registerServer(email, password, confirmPassword, registrat
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin",
-    body: JSON.stringify({ email, username: email, password, confirmPassword, registrationCode }),
+    body: JSON.stringify({ email, password, confirmPassword, registrationCode }),
+  });
+  return readJsonResponse(response);
+}
+
+export async function resendVerificationEmail(email) {
+  const response = await fetch("/api/auth/resend-verification", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ email }),
+  });
+  return readJsonResponse(response);
+}
+
+export async function requestPasswordReset(email) {
+  const response = await fetch("/api/auth/request-password-reset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ email }),
+  });
+  return readJsonResponse(response);
+}
+
+export async function changeServerPassword(oldPassword, newPassword, confirmPassword) {
+  const response = await fetch("/api/auth/change-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ oldPassword, newPassword, confirmPassword }),
   });
   return readJsonResponse(response);
 }
@@ -69,6 +99,36 @@ export async function resetServerUserPassword(userId, password) {
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin",
     body: JSON.stringify({ password }),
+  });
+  return readJsonResponse(response);
+}
+
+export async function updateServerUserEmail(userId, email) {
+  const response = await fetch(`/api/auth/users/${encodeURIComponent(userId)}/email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ email }),
+  });
+  return readJsonResponse(response);
+}
+
+export async function verifyServerUserEmail(userId) {
+  const response = await fetch(`/api/auth/users/${encodeURIComponent(userId)}/verify-email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({}),
+  });
+  return readJsonResponse(response);
+}
+
+export async function resendServerUserVerification(userId) {
+  const response = await fetch(`/api/auth/users/${encodeURIComponent(userId)}/resend-verification`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({}),
   });
   return readJsonResponse(response);
 }

@@ -1,5 +1,5 @@
-import { AUTH_SESSION_KEY, DEMO_USER } from "../config/auth.js";
-import { checkServerSession, loginServer, logoutServer, registerServer } from "./server-auth.js";
+﻿import { AUTH_SESSION_KEY, DEMO_USER } from "../config/auth.js";
+import { checkServerSession, loginServer, logoutServer, registerServer, requestPasswordReset, resendVerificationEmail } from "./server-auth.js";
 
 export function createAuthController(elements) {
   const authModal = document.querySelector("#authModal");
@@ -11,7 +11,7 @@ export function createAuthController(elements) {
   const authSubmitButton = authModal.querySelector("#authSubmitButton");
   const authTitle = authModal.querySelector("#authTitle");
   const authEyebrow = authModal.querySelector("#authEyebrow");
-  const authIdentityInput = authForm.elements.username;
+  const authIdentityInput = authForm.elements.email || authForm.elements.username;
 
   const state = {
     isAuthenticated: localStorage.getItem(AUTH_SESSION_KEY) === "true",
@@ -45,7 +45,7 @@ export function createAuthController(elements) {
     if (elements.sidebarAccountStatus) elements.sidebarAccountStatus.textContent = accountStatus;
     elements.modal.querySelector("#entryFormHint").textContent = state.isAuthenticated
       ? state.authMode === "server"
-        ? "当前已通过服务器账号登录，数据会按账号隔离，并可同步到服务器。"
+        ? "当前已通过服务器邮箱账号登录，数据会按账号隔离，并可同步到服务器。"
         : "保存后会写入本地浏览器存储。"
       : "当前为浏览模式，登录后才可以新增、编辑和删除信息。";
   }
@@ -61,12 +61,12 @@ export function createAuthController(elements) {
       input?.toggleAttribute("required", state.formMode === "register" && input.name === "confirmPassword");
     });
     if (authIdentityInput) {
-      authIdentityInput.type = state.formMode === "register" ? "email" : "text";
-      authIdentityInput.autocomplete = state.formMode === "register" ? "email" : "username";
-      authIdentityInput.placeholder = state.formMode === "register" ? "name@example.com" : "邮箱或 admin";
+      authIdentityInput.type = "email";
+      authIdentityInput.autocomplete = "email";
+      authIdentityInput.placeholder = "name@example.com";
     }
     if (authSubmitButton) authSubmitButton.textContent = state.formMode === "register" ? "注册" : "登录";
-    if (authTitle) authTitle.textContent = state.formMode === "register" ? "创建账号" : "账号访问";
+    if (authTitle) authTitle.textContent = state.formMode === "register" ? "邮箱注册" : "邮箱登录";
     if (authEyebrow) authEyebrow.textContent = state.formMode === "register" ? "注册" : "登录";
   }
 
@@ -173,7 +173,7 @@ export function createAuthController(elements) {
     event.preventDefault();
 
     const formData = new FormData(authForm);
-    const identity = String(formData.get("username") || "").trim();
+    const identity = String(formData.get("email") || formData.get("username") || "").trim().toLowerCase();
     const password = String(formData.get("password") || "");
     const confirmPassword = String(formData.get("confirmPassword") || "");
     const registrationCode = String(formData.get("registrationCode") || "").trim();
@@ -187,15 +187,14 @@ export function createAuthController(elements) {
         authHint.textContent = "服务器未开启账号注册。请在 VPS 的 .env 中设置 PERSONAL_HUB_REGISTRATION_ENABLED=true。";
         return;
       }
+      if (!identity.includes("@")) {
+        authHint.textContent = "注册必须使用邮箱地址。";
+        return;
+      }
       try {
         const result = await registerServer(identity, password, confirmPassword, registrationCode);
-        state.isAuthenticated = true;
-        state.authMode = "server";
-        state.user = result.user || null;
-        localStorage.setItem(AUTH_SESSION_KEY, "true");
-        authModal.close();
-        renderAuthState();
-        notifyServerLogin();
+        authHint.textContent = result.message || "注册成功，请前往邮箱完成验证后再登录。";
+        setFormMode("login");
         return;
       } catch (error) {
         authHint.textContent = error.message || "注册失败。";
@@ -216,12 +215,15 @@ export function createAuthController(elements) {
         return;
       } catch (error) {
         authHint.textContent = error.message || "服务器登录失败。";
+        if (error.payload?.code === "EMAIL_NOT_VERIFIED") {
+          authHint.innerHTML = `${error.message || "邮箱尚未验证。"} <button class="text-link-button" data-resend-verification type="button">重新发送验证邮件</button>`;
+        }
         return;
       }
     }
 
     if (identity !== DEMO_USER.username || password !== DEMO_USER.password) {
-      authHint.textContent = "账号或密码不正确。本地原型账号：admin / hub2026。";
+      authHint.textContent = "邮箱或密码不正确。本地原型账号：admin / hub2026。";
       return;
     }
 
@@ -231,6 +233,42 @@ export function createAuthController(elements) {
     localStorage.setItem(AUTH_SESSION_KEY, "true");
     authModal.close();
     renderAuthState();
+  });
+
+  authForm.addEventListener("click", async (event) => {
+    const resetButton = event.target.closest("[data-request-password-reset]");
+    if (resetButton) {
+      event.preventDefault();
+      const formData = new FormData(authForm);
+      const email = String(formData.get("email") || formData.get("username") || "").trim().toLowerCase();
+      if (!email) {
+        authHint.textContent = "请先填写邮箱。";
+        return;
+      }
+      try {
+        const result = await requestPasswordReset(email);
+        authHint.textContent = result.message || "如果邮箱已注册，系统会发送密码重置邮件。";
+      } catch (error) {
+        authHint.textContent = error.message || "密码重置邮件发送失败。";
+      }
+      return;
+    }
+
+    const resendButton = event.target.closest("[data-resend-verification]");
+    if (!resendButton) return;
+    event.preventDefault();
+    const formData = new FormData(authForm);
+    const email = String(formData.get("email") || formData.get("username") || "").trim().toLowerCase();
+    if (!email) {
+      authHint.textContent = "请先填写邮箱。";
+      return;
+    }
+    try {
+      const result = await resendVerificationEmail(email);
+      authHint.textContent = result.message || "验证邮件已重新发送。";
+    } catch (error) {
+      authHint.textContent = error.message || "验证邮件发送失败。";
+    }
   });
 
   setFormMode("login");

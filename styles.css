@@ -269,6 +269,17 @@ button {
   background: var(--surface-2);
 }
 
+.text-link-button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  text-decoration: underline;
+}
+
 .icon-button {
   width: 38px;
   padding: 0;
@@ -4026,12 +4037,6 @@ h2 {
   font-weight: 800;
 }
 
-.settings-roadmap-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
 .muted-text {
   color: var(--muted);
   font-size: 12px;
@@ -4995,7 +5000,6 @@ tr:last-child td {
     .settings-stat-grid,
     .settings-action-grid,
     .server-sync-grid,
-    .settings-roadmap-list,
     .merge-preview-summary,
     .merge-preview-detail-grid,
     .kanban-board {

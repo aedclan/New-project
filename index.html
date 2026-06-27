@@ -312,8 +312,8 @@
             <button data-auth-mode="register" type="button">注册</button>
           </div>
           <label>
-            邮箱 / 管理员账号
-            <input name="username" autocomplete="email" required placeholder="name@example.com" />
+            邮箱
+            <input name="email" type="email" autocomplete="email" required placeholder="name@example.com" />
           </label>
           <label>
             密码
@@ -332,6 +332,7 @@
 
         <div class="modal-actions">
           <button class="ghost-button" value="cancel" type="submit" formnovalidate>取消</button>
+          <button class="ghost-button" data-request-password-reset type="button">忘记密码</button>
           <button class="primary-button" value="default" id="authSubmitButton" type="submit">登录</button>
         </div>
       </form>

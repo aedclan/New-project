@@ -31,6 +31,9 @@ PERSONAL_HUB_SECURE_COOKIE=true
 PERSONAL_HUB_APP_DIR=/opt/New-project
 PERSONAL_HUB_DOMAIN=https://www.aedclan.com
 PERSONAL_HUB_HEALTH_URL=http://127.0.0.1:5173/healthz
+PUBLIC_SITE_URL=https://www.aedclan.com
+AUTH_EMAIL_FROM=Personal Hub <notice@example.com>
+AUTH_PASSWORD_RESET_MAX_AGE=3600
 ```
 
 检查生产配置：
@@ -52,6 +55,16 @@ PERSONAL_HUB_REGISTRATION_ENABLED=false
 ```bash
 PERSONAL_HUB_REGISTRATION_ENABLED=true
 PERSONAL_HUB_REGISTRATION_CODE=一串只有你知道的邀请码
+```
+
+邮箱注册还需要配置邮件服务：
+
+```bash
+RESEND_API_KEY=你的 Resend API Key
+AUTH_EMAIL_FROM=Personal Hub <notice@example.com>
+PUBLIC_SITE_URL=https://www.aedclan.com
+AUTH_EMAIL_VERIFICATION_MAX_AGE=86400
+AUTH_PASSWORD_RESET_MAX_AGE=3600
 ```
 
 ## 二、备份与恢复
