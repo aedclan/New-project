@@ -11,6 +11,7 @@ export function createAuthController(elements) {
   const authSubmitButton = authModal.querySelector("#authSubmitButton");
   const authTitle = authModal.querySelector("#authTitle");
   const authEyebrow = authModal.querySelector("#authEyebrow");
+  const authIdentityInput = authForm.elements.username;
 
   const state = {
     isAuthenticated: localStorage.getItem(AUTH_SESSION_KEY) === "true",
@@ -34,7 +35,7 @@ export function createAuthController(elements) {
   function renderAuthState() {
     document.body.classList.toggle("is-locked", !state.isAuthenticated);
     authButton.textContent = state.isAuthenticated ? "退出" : "登录";
-    const accountName = state.isAuthenticated ? state.user?.username || DEMO_USER.username : "未登录";
+    const accountName = state.isAuthenticated ? state.user?.email || state.user?.username || DEMO_USER.username : "未登录";
     const accountStatus = state.isAuthenticated
       ? state.authMode === "server"
         ? `${state.user?.role || "user"} · 服务器实时同步`
@@ -59,6 +60,11 @@ export function createAuthController(elements) {
       field.hidden = state.formMode !== "register";
       input?.toggleAttribute("required", state.formMode === "register" && input.name === "confirmPassword");
     });
+    if (authIdentityInput) {
+      authIdentityInput.type = state.formMode === "register" ? "email" : "text";
+      authIdentityInput.autocomplete = state.formMode === "register" ? "email" : "username";
+      authIdentityInput.placeholder = state.formMode === "register" ? "name@example.com" : "邮箱或 admin";
+    }
     if (authSubmitButton) authSubmitButton.textContent = state.formMode === "register" ? "注册" : "登录";
     if (authTitle) authTitle.textContent = state.formMode === "register" ? "创建账号" : "账号访问";
     if (authEyebrow) authEyebrow.textContent = state.formMode === "register" ? "注册" : "登录";
@@ -69,11 +75,11 @@ export function createAuthController(elements) {
       authHint.textContent = state.serverConfigured
         ? state.registrationCodeRequired
           ? "注册需要输入服务器配置的邀请码。"
-          : "创建服务器账号后，可以按账号隔离数据并跨设备同步。"
+          : "使用邮箱创建服务器账号后，可以按账号隔离数据并跨设备同步。"
         : "本地演示模式不能创建真实账号，需要在 VPS 开启注册后使用。";
       return;
     }
-    authHint.textContent = state.serverConfigured ? "使用服务器账号登录后，可编辑并跨设备同步数据。" : "本地演示账号：admin / hub2026。";
+    authHint.textContent = state.serverConfigured ? "使用邮箱登录后，可编辑并跨设备同步数据。" : "本地演示账号：admin / hub2026。";
   }
 
   function openLogin(mode = "login") {
@@ -167,7 +173,7 @@ export function createAuthController(elements) {
     event.preventDefault();
 
     const formData = new FormData(authForm);
-    const username = String(formData.get("username") || "").trim();
+    const identity = String(formData.get("username") || "").trim();
     const password = String(formData.get("password") || "");
     const confirmPassword = String(formData.get("confirmPassword") || "");
     const registrationCode = String(formData.get("registrationCode") || "").trim();
@@ -182,7 +188,7 @@ export function createAuthController(elements) {
         return;
       }
       try {
-        const result = await registerServer(username, password, confirmPassword, registrationCode);
+        const result = await registerServer(identity, password, confirmPassword, registrationCode);
         state.isAuthenticated = true;
         state.authMode = "server";
         state.user = result.user || null;
@@ -199,7 +205,7 @@ export function createAuthController(elements) {
 
     if (state.serverConfigured) {
       try {
-        const result = await loginServer(username, password);
+        const result = await loginServer(identity, password);
         state.isAuthenticated = true;
         state.authMode = "server";
         state.user = result.user || null;
@@ -214,14 +220,14 @@ export function createAuthController(elements) {
       }
     }
 
-    if (username !== DEMO_USER.username || password !== DEMO_USER.password) {
+    if (identity !== DEMO_USER.username || password !== DEMO_USER.password) {
       authHint.textContent = "账号或密码不正确。本地原型账号：admin / hub2026。";
       return;
     }
 
     state.isAuthenticated = true;
     state.authMode = "local";
-    state.user = { username };
+    state.user = { username: identity };
     localStorage.setItem(AUTH_SESSION_KEY, "true");
     authModal.close();
     renderAuthState();

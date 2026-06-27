@@ -398,7 +398,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
                 (user) => `
                   <article class="user-management-row ${user.disabled ? "is-disabled" : ""}">
                     <div>
-                      <strong>${escapeHtml(user.username)}${user.isCurrent ? "（当前）" : ""}</strong>
+                      <strong>${escapeHtml(user.email || user.username)}${user.isCurrent ? "（当前）" : ""}</strong>
                       <span>${escapeHtml(user.role)} · ${user.disabled ? "已禁用" : "正常"} · ${user.data?.hasData ? "已有数据" : "暂无数据"}</span>
                       <em>${escapeHtml(user.data?.legacy ? "正在兼容旧全局数据" : user.data?.dataFile || "")}</em>
                     </div>

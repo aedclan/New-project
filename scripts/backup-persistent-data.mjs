@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
-import { basename, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const defaultTargets = [
@@ -14,6 +14,19 @@ const defaultTargets = [
     label: "auth",
   },
 ];
+
+function collectUserDataTargets() {
+  const dataFile = resolve(process.env.PERSONAL_HUB_DATA_FILE || "/app/data/personal-hub-data.json");
+  const usersDir = resolve(process.env.PERSONAL_HUB_USER_DATA_DIR || join(dirname(dataFile), "users"));
+  if (!existsSync(usersDir)) return [];
+
+  return readdirSync(usersDir)
+    .filter((file) => /^user-\d+\.json$/i.test(file))
+    .map((file) => ({
+      filePath: join(usersDir, file),
+      label: `user-${file.match(/\d+/)?.[0] || "data"}`,
+    }));
+}
 
 function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
@@ -56,8 +69,16 @@ export function createPersistentDataBackup(options = {}) {
 
   mkdirSync(backupDir, { recursive: true });
 
-  defaultTargets.forEach((target) => {
-    const sourcePath = resolve(process.env[target.envKey] || target.fallback);
+  const targets = [
+    ...defaultTargets.map((target) => ({
+      sourcePath: resolve(process.env[target.envKey] || target.fallback),
+      label: target.label,
+    })),
+    ...collectUserDataTargets(),
+  ];
+
+  targets.forEach((target) => {
+    const sourcePath = target.sourcePath;
     if (!existsSync(sourcePath)) {
       skipped.push({ label: target.label, sourcePath, reason: "missing" });
       return;

@@ -34,6 +34,7 @@
           <span class="eyebrow">当前账号</span>
           <strong id="sidebarAccountName">未登录</strong>
           <small id="sidebarAccountStatus">浏览模式</small>
+          <span class="account-version-badge" id="appVersionBadge">v0.21.0</span>
         </section>
       </aside>
 
@@ -311,8 +312,8 @@
             <button data-auth-mode="register" type="button">注册</button>
           </div>
           <label>
-            账号
-            <input name="username" autocomplete="username" required placeholder="admin" />
+            邮箱 / 管理员账号
+            <input name="username" autocomplete="email" required placeholder="name@example.com" />
           </label>
           <label>
             密码
@@ -348,7 +349,6 @@
     </dialog>
 
     <script type="module" src="src/main.js"></script>
-    <div class="app-version-badge" id="appVersionBadge">v0.21.0</div>
   
     <script>
   </body>

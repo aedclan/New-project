@@ -17,22 +17,22 @@ export async function checkServerSession() {
   return readJsonResponse(response);
 }
 
-export async function loginServer(username, password) {
+export async function loginServer(identity, password) {
   const response = await fetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username: identity, email: identity, password }),
   });
   return readJsonResponse(response);
 }
 
-export async function registerServer(username, password, confirmPassword, registrationCode) {
+export async function registerServer(email, password, confirmPassword, registrationCode) {
   const response = await fetch("/api/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin",
-    body: JSON.stringify({ username, password, confirmPassword, registrationCode }),
+    body: JSON.stringify({ email, username: email, password, confirmPassword, registrationCode }),
   });
   return readJsonResponse(response);
 }

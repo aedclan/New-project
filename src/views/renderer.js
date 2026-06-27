@@ -3219,7 +3219,7 @@ function renderSettings(elements, data, ui, authController) {
   const currentUser = authController?.user || null;
   const isServerAccount = Boolean(authController?.isServerAuthenticated);
   const isAdmin = Boolean(authController?.isAdmin);
-  const accountName = isServerAccount ? currentUser?.username || "已登录账号" : authController?.isAuthenticated ? "本地演示账号" : "未登录";
+  const accountName = isServerAccount ? currentUser?.email || currentUser?.username || "已登录账号" : authController?.isAuthenticated ? "本地演示账号" : "未登录";
   const accountRole = isServerAccount ? currentUser?.role || "user" : authController?.isAuthenticated ? "local" : "readonly";
   const syncScope = isServerAccount ? `账号独立数据：user-${currentUser?.id || ""}.json` : "仅本地浏览器数据";
   const moduleStats = [

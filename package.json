@@ -9,6 +9,9 @@
     "start": "node scripts/dev-server.mjs",
     "check": "node scripts/check.mjs",
     "backup:data": "node scripts/backup-persistent-data.mjs",
+    "backup:list": "node scripts/restore-persistent-data.mjs --list",
+    "restore:data": "node scripts/restore-persistent-data.mjs",
+    "check:production": "node scripts/check-production-env.mjs",
     "send-subscription-emails": "node scripts/send-subscription-emails.mjs"
   },
   "keywords": [

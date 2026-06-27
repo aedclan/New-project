@@ -159,6 +159,9 @@ button {
 
 .account-card {
   margin-top: 12px;
+  position: relative;
+  min-height: 102px;
+  padding-bottom: 34px;
 }
 
 .account-card strong {
@@ -2595,23 +2598,20 @@ h2 {
   color: var(--warning);
 }
 
-.app-version-badge {
-  position: fixed;
-  left: 14px;
-  bottom: 12px;
-  z-index: 40;
+.account-version-badge {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
   display: inline-flex;
   align-items: center;
-  height: 28px;
+  height: 24px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  box-shadow: var(--shadow);
-  padding: 0 10px;
+  background: color-mix(in srgb, var(--surface-2) 90%, transparent);
+  padding: 0 9px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
-  backdrop-filter: blur(12px);
 }
 
 .cashflow-panel {
@@ -4960,9 +4960,6 @@ tr:last-child td {
     color: var(--text);
   }
 
-  .app-version-badge {
-    bottom: 72px;
-  }
 }
 
 @media (max-width: 680px) {

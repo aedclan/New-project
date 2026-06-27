@@ -53,10 +53,15 @@ const requiredFiles = [
   "src/views/renderer.js",
   "scripts/persistent-data-service.mjs",
   "scripts/backup-persistent-data.mjs",
+  "scripts/restore-persistent-data.mjs",
+  "scripts/check-production-env.mjs",
   "scripts/scheduled-backup-service.mjs",
   "scripts/auth-service.mjs",
+  "scripts/deploy-vps.sh",
+  "scripts/rollback-vps.sh",
   "EMAIL_NOTIFICATION_SETUP.md",
   "SERVER_SYNC_AND_BACKUP.md",
+  "DATA_SECURITY_AND_DEPLOYMENT.md",
 ];
 const missing = requiredFiles.filter((file) => !existsSync(file));
 
@@ -83,7 +88,7 @@ const requiredSnippets = [
   '<link rel="stylesheet" href="styles.css" />',
   '<script type="module" src="src/main.js"></script>',
   '<nav class="nav-list" id="navList"></nav>',
-  '<div class="app-version-badge" id="appVersionBadge">',
+  'class="account-version-badge" id="appVersionBadge"',
   '<title>个人工作台</title>',
   'placeholder="搜索事项、账单、笔记、项目集..."',
 ];
@@ -114,9 +119,12 @@ const realtimeSync = readFileSync("src/core/realtime-sync.js", "utf8");
 const devServer = readFileSync("scripts/dev-server.mjs", "utf8");
 const persistentDataService = readFileSync("scripts/persistent-data-service.mjs", "utf8");
 const backupDataScript = readFileSync("scripts/backup-persistent-data.mjs", "utf8");
+const restoreDataScript = readFileSync("scripts/restore-persistent-data.mjs", "utf8");
+const productionEnvScript = readFileSync("scripts/check-production-env.mjs", "utf8");
 const authService = readFileSync("scripts/auth-service.mjs", "utf8");
 const compose = readFileSync("docker-compose.yml", "utf8");
 const serverSyncDoc = readFileSync("SERVER_SYNC_AND_BACKUP.md", "utf8");
+const securityDeployDoc = readFileSync("DATA_SECURITY_AND_DEPLOYMENT.md", "utf8");
 const requiredRendererSnippets = [
   "function renderDashboard",
   "function renderBills",
@@ -317,7 +325,14 @@ const serverSyncSnippets = [
   "personal-hub-data:",
   "importData(payload)",
   "backup:data",
+  "backup:list",
+  "restore:data",
+  "check:production",
   "createPersistentDataBackup",
+  "restore-persistent-data.mjs",
+  "check-production-env.mjs",
+  "deploy-vps.sh",
+  "rollback-vps.sh",
   "startScheduledBackups",
   "scheduled-backup-service.mjs",
   "SERVER_SYNC_AUTO_KEY",
@@ -345,10 +360,13 @@ const missingServerSyncSnippets = serverSyncSnippets.filter(
     !devServer.includes(snippet) &&
     !persistentDataService.includes(snippet) &&
     !backupDataScript.includes(snippet) &&
+    !restoreDataScript.includes(snippet) &&
+    !productionEnvScript.includes(snippet) &&
     !authService.includes(snippet) &&
     !compose.includes(snippet) &&
     !packageText.includes(snippet) &&
-    !serverSyncDoc.includes(snippet),
+    !serverSyncDoc.includes(snippet) &&
+    !securityDeployDoc.includes(snippet),
 );
 if (missingServerSyncSnippets.length > 0) {
   console.error(`Server sync hooks are missing:\n${missingServerSyncSnippets.join("\n")}`);

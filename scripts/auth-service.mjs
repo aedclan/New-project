@@ -82,6 +82,7 @@ function getDb() {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,
+      email TEXT UNIQUE,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'admin',
       disabled INTEGER NOT NULL DEFAULT 0,
@@ -98,16 +99,29 @@ function getDb() {
   `);
 
   const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
+  if (!userColumns.includes("email")) {
+    db.exec("ALTER TABLE users ADD COLUMN email TEXT");
+  }
   if (!userColumns.includes("disabled")) {
     db.exec("ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0");
   }
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(email) WHERE email IS NOT NULL AND email != ''");
+  db
+    .prepare("SELECT id, username FROM users WHERE email IS NULL OR email = ''")
+    .all()
+    .filter((user) => validateEmail(user.username))
+    .forEach((user) => {
+      db.prepare("UPDATE users SET email = ? WHERE id = ?").run(normalizeEmail(user.username), user.id);
+    });
 
   if (adminUsername && adminPassword) {
     const existing = db.prepare("SELECT id FROM users WHERE username = ?").get(adminUsername);
     const now = new Date().toISOString();
+    const adminEmail = validateEmail(adminUsername) ? normalizeEmail(adminUsername) : null;
     if (!existing) {
-      db.prepare("INSERT INTO users (username, password_hash, role, created_at, updated_at) VALUES (?, ?, 'admin', ?, ?)").run(
+      db.prepare("INSERT INTO users (username, email, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, 'admin', ?, ?)").run(
         adminUsername,
+        adminEmail,
         hashPassword(adminPassword),
         now,
         now,
@@ -135,7 +149,7 @@ export function getCurrentUser(request) {
   cleanupExpiredSessions(database);
   return database
     .prepare(
-      `SELECT users.id, users.username, users.role
+      `SELECT users.id, users.username, users.email, users.role
        FROM sessions
        JOIN users ON users.id = sessions.user_id
        WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND users.disabled = 0`,
@@ -148,7 +162,7 @@ function hasUsers() {
 }
 
 function publicUser(user) {
-  return user ? { id: user.id, username: user.username, role: user.role, disabled: Boolean(user.disabled) } : null;
+  return user ? { id: user.id, username: user.username, email: user.email || "", role: user.role, disabled: Boolean(user.disabled) } : null;
 }
 
 function requireAdmin(request, response) {
@@ -192,6 +206,14 @@ function validateUsername(username) {
   return /^[a-zA-Z0-9_.@-]{3,32}$/.test(username);
 }
 
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function validateEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(email));
+}
+
 function validatePassword(password) {
   return String(password || "").length >= 8;
 }
@@ -233,7 +255,7 @@ export async function handleAuthRequest(request, response) {
     if (!admin) return true;
     const users = getDb()
       .prepare(
-        `SELECT id, username, role, disabled, created_at AS createdAt, updated_at AS updatedAt
+        `SELECT id, username, email, role, disabled, created_at AS createdAt, updated_at AS updatedAt
          FROM users
          ORDER BY role = 'admin' DESC, created_at ASC`,
       )
@@ -255,7 +277,7 @@ export async function handleAuthRequest(request, response) {
     if (!admin) return true;
     const userId = Number(userActionMatch[1]);
     const action = userActionMatch[2];
-    const target = getDb().prepare("SELECT id, username, role, disabled FROM users WHERE id = ?").get(userId);
+    const target = getDb().prepare("SELECT id, username, email, role, disabled FROM users WHERE id = ?").get(userId);
     if (!target) {
       jsonResponse(response, 404, { ok: false, message: "用户不存在。" });
       return true;
@@ -323,13 +345,13 @@ export async function handleAuthRequest(request, response) {
     }
 
     const payload = await readRequestJson(request);
-    const username = String(payload.username || "").trim();
+    const email = normalizeEmail(payload.email || payload.username);
     const password = String(payload.password || "");
     const confirmPassword = String(payload.confirmPassword || "");
     const code = String(payload.registrationCode || "").trim();
 
-    if (!validateUsername(username)) {
-      jsonResponse(response, 400, { ok: false, message: "账号需为 3-32 位，可使用字母、数字、下划线、点、@ 或短横线。" });
+    if (!validateEmail(email)) {
+      jsonResponse(response, 400, { ok: false, message: "请使用有效邮箱注册。" });
       return true;
     }
     if (!validatePassword(password)) {
@@ -346,20 +368,21 @@ export async function handleAuthRequest(request, response) {
     }
 
     const database = getDb();
-    const existing = database.prepare("SELECT id FROM users WHERE username = ?").get(username);
+    const existing = database.prepare("SELECT id FROM users WHERE username = ? OR email = ?").get(email, email);
     if (existing) {
-      jsonResponse(response, 409, { ok: false, message: "账号已存在，请直接登录。" });
+      jsonResponse(response, 409, { ok: false, message: "该邮箱已注册，请直接登录。" });
       return true;
     }
 
     const now = new Date().toISOString();
-    const result = database.prepare("INSERT INTO users (username, password_hash, role, created_at, updated_at) VALUES (?, ?, 'user', ?, ?)").run(
-      username,
+    const result = database.prepare("INSERT INTO users (username, email, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, 'user', ?, ?)").run(
+      email,
+      email,
       hashPassword(password),
       now,
       now,
     );
-    const user = database.prepare("SELECT id, username, role FROM users WHERE id = ?").get(result.lastInsertRowid);
+    const user = database.prepare("SELECT id, username, email, role FROM users WHERE id = ?").get(result.lastInsertRowid);
     const token = createSession(user);
     jsonResponse(
       response,
@@ -376,9 +399,12 @@ export async function handleAuthRequest(request, response) {
       return true;
     }
     const payload = await readRequestJson(request);
-    const username = String(payload.username || "").trim();
+    const identity = String(payload.email || payload.username || "").trim();
+    const normalizedEmail = normalizeEmail(identity);
     const password = String(payload.password || "");
-    const user = getDb().prepare("SELECT id, username, role, password_hash, disabled FROM users WHERE username = ?").get(username);
+    const user = getDb()
+      .prepare("SELECT id, username, email, role, password_hash, disabled FROM users WHERE username = ? OR username = ? OR email = ?")
+      .get(identity, normalizedEmail, normalizedEmail);
     if (!user || !verifyPassword(password, user.password_hash)) {
       jsonResponse(response, 401, { ok: false, configured: true, message: "账号或密码不正确。" });
       return true;
