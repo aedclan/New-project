@@ -1,5 +1,6 @@
 ﻿import { randomBytes, scryptSync, timingSafeEqual, createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { randomInt } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -15,6 +16,9 @@ const resendApiKey = String(process.env.RESEND_API_KEY || "").trim();
 const publicSiteUrl = String(process.env.PUBLIC_SITE_URL || process.env.PERSONAL_HUB_DOMAIN || "http://127.0.0.1:5173").replace(/\/+$/, "");
 const emailVerificationMaxAgeSeconds = Number(process.env.AUTH_EMAIL_VERIFICATION_MAX_AGE || 60 * 60 * 24);
 const passwordResetMaxAgeSeconds = Number(process.env.AUTH_PASSWORD_RESET_MAX_AGE || 60 * 60);
+const registerCodeMaxAgeSeconds = Number(process.env.AUTH_REGISTER_CODE_MAX_AGE || 10 * 60);
+const registerCodeCooldownSeconds = Number(process.env.AUTH_REGISTER_CODE_COOLDOWN || 60);
+const registerCodeMaxAttempts = Number(process.env.AUTH_REGISTER_CODE_MAX_ATTEMPTS || 5);
 
 let db;
 
@@ -131,6 +135,15 @@ function getDb() {
       used_at TEXT,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS email_code_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      used_at TEXT
+    );
   `);
 
   const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
@@ -222,6 +235,75 @@ async function createAndSendVerificationEmail(user) {
       </div>
     `,
   });
+}
+
+function createNumericCode() {
+  return String(randomInt(100000, 1000000));
+}
+
+async function createAndSendRegisterCode(email) {
+  const normalizedEmail = normalizeEmail(email);
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const recent = getDb()
+    .prepare("SELECT created_at AS createdAt FROM email_code_tokens WHERE email = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1")
+    .get(normalizedEmail);
+  if (recent) {
+    const elapsedSeconds = (now.getTime() - new Date(recent.createdAt).getTime()) / 1000;
+    if (elapsedSeconds < registerCodeCooldownSeconds) {
+      throw new Error(`验证码发送过于频繁，请 ${Math.ceil(registerCodeCooldownSeconds - elapsedSeconds)} 秒后再试。`);
+    }
+  }
+
+  const code = createNumericCode();
+  const expiresAt = new Date(now.getTime() + registerCodeMaxAgeSeconds * 1000).toISOString();
+  getDb().prepare("UPDATE email_code_tokens SET used_at = ? WHERE email = ? AND used_at IS NULL").run(nowIso, normalizedEmail);
+  getDb()
+    .prepare("INSERT INTO email_code_tokens (email, code_hash, expires_at, created_at) VALUES (?, ?, ?, ?)")
+    .run(normalizedEmail, hashToken(code), expiresAt, nowIso);
+
+  await sendAuthEmail({
+    to: normalizedEmail,
+    subject: "Personal Hub 注册验证码",
+    html: `
+      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.7;color:#111827;">
+        <h2>注册验证码</h2>
+        <p>你的 Personal Hub 注册验证码是：</p>
+        <p style="font-size:28px;font-weight:800;letter-spacing:6px;">${code}</p>
+        <p>验证码 ${Math.round(registerCodeMaxAgeSeconds / 60)} 分钟内有效，请勿转发给他人。</p>
+      </div>
+    `,
+  });
+}
+
+function consumeRegisterCode(email, code) {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedCode = String(code || "").trim();
+  if (!/^\d{6}$/.test(normalizedCode)) {
+    throw new Error("请填写 6 位邮箱验证码。");
+  }
+  const now = new Date().toISOString();
+  const record = getDb()
+    .prepare(
+      `SELECT id, code_hash AS codeHash, attempts
+       FROM email_code_tokens
+       WHERE email = ? AND expires_at > ? AND used_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+    .get(normalizedEmail, now);
+  if (!record) {
+    throw new Error("验证码不存在或已过期，请重新发送。");
+  }
+  if (Number(record.attempts || 0) >= registerCodeMaxAttempts) {
+    getDb().prepare("UPDATE email_code_tokens SET used_at = ? WHERE id = ?").run(now, record.id);
+    throw new Error("验证码错误次数过多，请重新发送。");
+  }
+  if (record.codeHash !== hashToken(normalizedCode)) {
+    getDb().prepare("UPDATE email_code_tokens SET attempts = attempts + 1 WHERE id = ?").run(record.id);
+    throw new Error("验证码不正确。");
+  }
+  getDb().prepare("UPDATE email_code_tokens SET used_at = ? WHERE id = ?").run(now, record.id);
 }
 
 async function createAndSendPasswordResetEmail(user) {
@@ -554,6 +636,7 @@ export async function handleAuthRequest(request, response) {
 
     const payload = await readRequestJson(request);
     const email = normalizeEmail(payload.email);
+    const emailCode = String(payload.emailCode || "").trim();
     const password = String(payload.password || "");
     const confirmPassword = String(payload.confirmPassword || "");
     const code = String(payload.registrationCode || "").trim();
@@ -574,6 +657,12 @@ export async function handleAuthRequest(request, response) {
       jsonResponse(response, 403, { ok: false, message: "注册码不正确。" });
       return true;
     }
+    try {
+      consumeRegisterCode(email, emailCode);
+    } catch (error) {
+      jsonResponse(response, 400, { ok: false, message: error.message || "邮箱验证码不正确。" });
+      return true;
+    }
 
     const database = getDb();
     const existing = database.prepare("SELECT id FROM users WHERE email = ? OR username = ?").get(email, email);
@@ -583,28 +672,53 @@ export async function handleAuthRequest(request, response) {
     }
 
     const now = new Date().toISOString();
-    if (!requireAuthEmailConfig()) {
-      jsonResponse(response, 503, { ok: false, message: "认证邮件服务未配置，暂不能开放邮箱注册。" });
-      return true;
-    }
-
-    const result = database.prepare("INSERT INTO users (username, email, password_hash, role, email_verified, created_at, updated_at) VALUES (?, ?, ?, 'user', 0, ?, ?)").run(
+    const result = database.prepare("INSERT INTO users (username, email, password_hash, role, email_verified, email_verified_at, created_at, updated_at) VALUES (?, ?, ?, 'user', 1, ?, ?, ?)").run(
       email,
       email,
       hashPassword(password),
       now,
       now,
+      now,
     );
     const user = database.prepare("SELECT id, username, email, role, email_verified AS emailVerified FROM users WHERE id = ?").get(result.lastInsertRowid);
-    await createAndSendVerificationEmail(user);
+    const token = createSession(user);
     jsonResponse(response, 201, {
       ok: true,
       configured: true,
-      authenticated: false,
-      verificationRequired: true,
+      authenticated: true,
+      verificationRequired: false,
       user: publicUser(user),
-      message: "注册成功，请前往邮箱完成验证后再登录。",
-    });
+      message: "注册成功，已自动登录。",
+    }, { "Set-Cookie": sessionCookie(token) });
+    return true;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/send-register-code") {
+    if (!registrationEnabled) {
+      jsonResponse(response, 403, { ok: false, configured: hasUsers(), registrationEnabled: false, message: "服务器未开启邮箱注册。" });
+      return true;
+    }
+    if (!requireAuthEmailConfig()) {
+      jsonResponse(response, 503, { ok: false, message: "认证邮件服务未配置，暂不能发送验证码。" });
+      return true;
+    }
+    const payload = await readRequestJson(request);
+    const email = normalizeEmail(payload.email);
+    if (!validateEmail(email)) {
+      jsonResponse(response, 400, { ok: false, message: "请使用有效邮箱接收验证码。" });
+      return true;
+    }
+    const existing = getDb().prepare("SELECT id FROM users WHERE email = ? OR username = ?").get(email, email);
+    if (existing) {
+      jsonResponse(response, 409, { ok: false, message: "该邮箱已注册，请直接登录。" });
+      return true;
+    }
+    try {
+      await createAndSendRegisterCode(email);
+      jsonResponse(response, 200, { ok: true, message: "验证码已发送，请检查邮箱。", cooldownSeconds: registerCodeCooldownSeconds });
+    } catch (error) {
+      jsonResponse(response, 400, { ok: false, message: error.message || "验证码发送失败。" });
+    }
     return true;
   }
 

@@ -27,12 +27,22 @@ export async function loginServer(email, password) {
   return readJsonResponse(response);
 }
 
-export async function registerServer(email, password, confirmPassword, registrationCode) {
+export async function sendRegisterEmailCode(email) {
+  const response = await fetch("/api/auth/send-register-code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ email }),
+  });
+  return readJsonResponse(response);
+}
+
+export async function registerServer(email, password, confirmPassword, registrationCode, emailCode) {
   const response = await fetch("/api/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin",
-    body: JSON.stringify({ email, password, confirmPassword, registrationCode }),
+    body: JSON.stringify({ email, password, confirmPassword, registrationCode, emailCode }),
   });
   return readJsonResponse(response);
 }

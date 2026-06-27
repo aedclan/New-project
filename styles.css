@@ -4390,6 +4390,24 @@ tr:last-child td {
   display: none !important;
 }
 
+.auth-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.auth-code-row .ghost-button {
+  min-height: 42px;
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .auth-code-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .modal-panel input,
 .modal-panel select,
 .modal-panel textarea {

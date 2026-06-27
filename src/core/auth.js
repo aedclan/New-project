@@ -1,5 +1,5 @@
 ﻿import { AUTH_SESSION_KEY, DEMO_USER } from "../config/auth.js";
-import { checkServerSession, loginServer, logoutServer, registerServer, requestPasswordReset, resendVerificationEmail } from "./server-auth.js";
+import { checkServerSession, loginServer, logoutServer, registerServer, requestPasswordReset, resendVerificationEmail, sendRegisterEmailCode } from "./server-auth.js";
 
 export function createAuthController(elements) {
   const authModal = document.querySelector("#authModal");
@@ -12,6 +12,8 @@ export function createAuthController(elements) {
   const authTitle = authModal.querySelector("#authTitle");
   const authEyebrow = authModal.querySelector("#authEyebrow");
   const authIdentityInput = authForm.elements.email || authForm.elements.username;
+  const sendRegisterCodeButton = authModal.querySelector("[data-send-register-code]");
+  let registerCodeTimer = null;
 
   const state = {
     isAuthenticated: localStorage.getItem(AUTH_SESSION_KEY) === "true",
@@ -58,7 +60,7 @@ export function createAuthController(elements) {
     authRegisterFields.forEach((field) => {
       const input = field.querySelector("input");
       field.hidden = state.formMode !== "register";
-      input?.toggleAttribute("required", state.formMode === "register" && input.name === "confirmPassword");
+      input?.toggleAttribute("required", state.formMode === "register" && ["confirmPassword", "emailCode"].includes(input.name));
     });
     if (authIdentityInput) {
       authIdentityInput.type = "email";
@@ -80,6 +82,24 @@ export function createAuthController(elements) {
       return;
     }
     authHint.textContent = state.serverConfigured ? "使用邮箱登录后，可编辑并跨设备同步数据。" : "本地演示账号：admin / hub2026。";
+  }
+
+  function startRegisterCodeCountdown(seconds = 60) {
+    if (!sendRegisterCodeButton) return;
+    window.clearInterval(registerCodeTimer);
+    let remaining = Math.max(1, Number(seconds) || 60);
+    sendRegisterCodeButton.disabled = true;
+    sendRegisterCodeButton.textContent = `${remaining} 秒后重发`;
+    registerCodeTimer = window.setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        window.clearInterval(registerCodeTimer);
+        sendRegisterCodeButton.disabled = false;
+        sendRegisterCodeButton.textContent = "发送验证码";
+        return;
+      }
+      sendRegisterCodeButton.textContent = `${remaining} 秒后重发`;
+    }, 1000);
   }
 
   function openLogin(mode = "login") {
@@ -177,6 +197,7 @@ export function createAuthController(elements) {
     const password = String(formData.get("password") || "");
     const confirmPassword = String(formData.get("confirmPassword") || "");
     const registrationCode = String(formData.get("registrationCode") || "").trim();
+    const emailCode = String(formData.get("emailCode") || "").trim();
 
     if (state.formMode === "register") {
       if (!state.serverConfigured) {
@@ -192,8 +213,18 @@ export function createAuthController(elements) {
         return;
       }
       try {
-        const result = await registerServer(identity, password, confirmPassword, registrationCode);
-        authHint.textContent = result.message || "注册成功，请前往邮箱完成验证后再登录。";
+        const result = await registerServer(identity, password, confirmPassword, registrationCode, emailCode);
+        if (result.authenticated) {
+          state.isAuthenticated = true;
+          state.authMode = "server";
+          state.user = result.user || null;
+          localStorage.setItem(AUTH_SESSION_KEY, "true");
+          authModal.close();
+          renderAuthState();
+          notifyServerLogin();
+          return;
+        }
+        authHint.textContent = result.message || "注册成功，请登录。";
         setFormMode("login");
         return;
       } catch (error) {
@@ -236,6 +267,37 @@ export function createAuthController(elements) {
   });
 
   authForm.addEventListener("click", async (event) => {
+    const sendCodeButton = event.target.closest("[data-send-register-code]");
+    if (sendCodeButton) {
+      event.preventDefault();
+      const formData = new FormData(authForm);
+      const email = String(formData.get("email") || formData.get("username") || "").trim().toLowerCase();
+      if (!state.serverConfigured) {
+        authHint.textContent = "当前服务器账号系统未配置，不能发送验证码。";
+        return;
+      }
+      if (!state.registrationEnabled) {
+        authHint.textContent = "服务器未开启账号注册。请在 VPS 的 .env 中设置 PERSONAL_HUB_REGISTRATION_ENABLED=true。";
+        return;
+      }
+      if (!email.includes("@")) {
+        authHint.textContent = "请先填写有效邮箱，再发送验证码。";
+        return;
+      }
+      try {
+        sendCodeButton.disabled = true;
+        sendCodeButton.textContent = "发送中...";
+        const result = await sendRegisterEmailCode(email);
+        authHint.textContent = result.message || "验证码已发送，请检查邮箱。";
+        startRegisterCodeCountdown(result.cooldownSeconds || 60);
+      } catch (error) {
+        sendCodeButton.disabled = false;
+        sendCodeButton.textContent = "发送验证码";
+        authHint.textContent = error.message || "验证码发送失败。";
+      }
+      return;
+    }
+
     const resetButton = event.target.closest("[data-request-password-reset]");
     if (resetButton) {
       event.preventDefault();

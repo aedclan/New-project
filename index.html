@@ -324,6 +324,13 @@
             <input name="confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入密码" />
           </label>
           <label class="auth-register-field" hidden>
+            邮箱验证码
+            <div class="auth-code-row">
+              <input name="emailCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位验证码" />
+              <button class="ghost-button" data-send-register-code type="button">发送验证码</button>
+            </div>
+          </label>
+          <label class="auth-register-field" hidden>
             注册码
             <input name="registrationCode" autocomplete="off" placeholder="可选的邀请码" />
           </label>
