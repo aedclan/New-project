@@ -345,7 +345,6 @@ const serverSyncSnippets = [
   "summarizeHubData",
   "formatHubDataSummary",
   "exportServerBackup",
-  "合并服务器数据",
 ];
 const missingServerSyncSnippets = serverSyncSnippets.filter(
   (snippet) =>

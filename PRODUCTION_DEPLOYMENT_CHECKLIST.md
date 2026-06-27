@@ -1,65 +1,31 @@
-# 生产部署清单
+# 生产部署检查清单
 
-适用环境：RackNerd VPS / Ubuntu 24.04 / Docker / Nginx / HTTPS
+VPS 项目路径：
 
-## 1. DNS
+```bash
+/opt/New-project
+```
 
-- [ ] `www.aedclan.com` 指向 VPS IP
-- [ ] `aedclan.com` 指向同一 VPS IP
+上线前检查：
 
-## 2. 服务器准备
+- [ ] `.env` 已配置真实管理员账号。
+- [ ] 管理员密码不是默认密码，并且至少 12 位。
+- [ ] `PERSONAL_HUB_SECURE_COOKIE=true`。
+- [ ] 注册默认关闭，或已配置注册码。
+- [ ] Docker 数据卷没有删除。
+- [ ] `npm run check` 通过。
+- [ ] `npm run check:production` 通过。
+- [ ] `npm run backup:data` 可以生成备份。
+- [ ] `docker compose ps` 显示容器 healthy。
+- [ ] `curl http://127.0.0.1:5173/healthz` 返回正常。
+- [ ] `https://www.aedclan.com` 可以访问。
+- [ ] 登录、退出、新增、修改、删除数据正常。
 
-- [ ] 安装 Docker
-- [ ] 安装 Docker Compose
-- [ ] 安装 Nginx
-- [ ] 安装 Certbot
+常用命令：
 
-## 3. 项目部署
-
-- [ ] 将项目放到 `/opt/personal-hub`
-- [ ] 复制 `.env.example` 为 `.env`
-- [ ] 如需邮件通知，填写 `RESEND_API_KEY`
-- [ ] 如需邮件通知，填写 `SUBSCRIPTION_EMAIL_FROM`
-- [ ] 执行 `docker compose up -d --build`
-
-## 4. 服务验证
-
-- [ ] 访问 `http://127.0.0.1:5173/healthz`
-- [ ] 确认返回 `{"ok":true,"service":"personal-hub"}`
-- [ ] 访问 `http://127.0.0.1:5173/`
-
-## 5. Nginx 反代
-
-- [ ] 配置 `server_name www.aedclan.com aedclan.com`
-- [ ] `proxy_pass http://127.0.0.1:5173`
-- [ ] 执行 `nginx -t`
-- [ ] 重载 Nginx
-
-## 6. HTTPS
-
-- [ ] 执行 `certbot --nginx -d www.aedclan.com -d aedclan.com`
-- [ ] 检查 HTTPS 自动跳转
-
-## 7. 防火墙
-
-- [ ] 放行 SSH
-- [ ] 放行 Nginx Full
-
-## 8. 更新流程
-
-- [ ] `git pull`
-- [ ] `docker compose up -d --build`
-- [ ] `docker compose ps`
-- [ ] `docker compose logs -f --tail=80`
-
-## 9. 常用排查
-
-- [ ] `curl http://127.0.0.1:5173/healthz`
-- [ ] `docker compose restart personal-hub`
-- [ ] `docker compose logs --tail=120 personal-hub`
-
-## 10. 备忘
-
-- 当前项目仍以浏览器本地存储为主。
-- 正式长期使用前，建议继续规划数据备份或数据库。
-- 站点域名统一使用 `www.aedclan.com` 和 `aedclan.com`。
+```bash
+cd /opt/New-project
+docker compose ps
+docker compose logs --tail=120 personal-hub
+curl http://127.0.0.1:5173/healthz
+```

@@ -1,18 +1,18 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -Eeuo pipefail
 
-APP_DIR="${PERSONAL_HUB_APP_DIR:-/opt/personal-hub/New-project}"
+APP_DIR="${PERSONAL_HUB_APP_DIR:-/opt/New-project}"
 DOMAIN="${PERSONAL_HUB_DOMAIN:-https://www.aedclan.com}"
 HEALTH_URL="${PERSONAL_HUB_HEALTH_URL:-http://127.0.0.1:5173/healthz}"
 
 cd "$APP_DIR"
 
-echo "== Personal Hub VPS 部署开始 =="
-echo "项目目录：$APP_DIR"
-echo "当前版本：$(git rev-parse --short HEAD)"
+echo "== Personal Hub VPS 閮ㄧ讲寮€濮?=="
+echo "椤圭洰鐩綍锛?APP_DIR"
+echo "褰撳墠鐗堟湰锛?(git rev-parse --short HEAD)"
 
 if [[ ! -f .env ]]; then
-  echo "错误：缺少 .env 文件。请先复制 .env.example 并配置生产环境变量。"
+  echo "閿欒锛氱己灏?.env 鏂囦欢銆傝鍏堝鍒?.env.example 骞堕厤缃敓浜х幆澧冨彉閲忋€?
   exit 1
 fi
 
@@ -31,12 +31,12 @@ git pull --ff-only
 docker compose up -d --build
 docker compose ps
 
-echo "检查本机健康接口：$HEALTH_URL"
+echo "妫€鏌ユ湰鏈哄仴搴锋帴鍙ｏ細$HEALTH_URL"
 curl -fsS "$HEALTH_URL" >/dev/null
 
-echo "检查域名访问：$DOMAIN"
-curl -fsSI "$DOMAIN" >/dev/null || echo "提醒：域名检查失败，请检查 Cloudflare / Nginx / HTTPS 配置。"
+echo "妫€鏌ュ煙鍚嶈闂細$DOMAIN"
+curl -fsSI "$DOMAIN" >/dev/null || echo "鎻愰啋锛氬煙鍚嶆鏌ュけ璐ワ紝璇锋鏌?Cloudflare / Nginx / HTTPS 閰嶇疆銆?
 
-echo "== 部署完成 =="
-echo "上线地址：$DOMAIN"
-echo "上一个版本已记录：$PREVIOUS_COMMIT"
+echo "== 閮ㄧ讲瀹屾垚 =="
+echo "涓婄嚎鍦板潃锛?DOMAIN"
+echo "涓婁竴涓増鏈凡璁板綍锛?PREVIOUS_COMMIT"

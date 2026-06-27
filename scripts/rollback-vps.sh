@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -Eeuo pipefail
 
-APP_DIR="${PERSONAL_HUB_APP_DIR:-/opt/personal-hub/New-project}"
+APP_DIR="${PERSONAL_HUB_APP_DIR:-/opt/New-project}"
 HEALTH_URL="${PERSONAL_HUB_HEALTH_URL:-http://127.0.0.1:5173/healthz}"
 TARGET_COMMIT="${1:-}"
 
@@ -11,21 +11,21 @@ if [[ -z "$TARGET_COMMIT" ]]; then
   if [[ -f .last-deploy-commit ]]; then
     TARGET_COMMIT="$(cat .last-deploy-commit)"
   else
-    echo "缺少回滚版本。用法：./scripts/rollback-vps.sh <commit>"
-    echo "最近提交："
+    echo "缂哄皯鍥炴粴鐗堟湰銆傜敤娉曪細./scripts/rollback-vps.sh <commit>"
+    echo "鏈€杩戞彁浜わ細"
     git log --oneline -5
     exit 1
   fi
 fi
 
-echo "== Personal Hub 回滚开始 =="
-echo "目标版本：$TARGET_COMMIT"
+echo "== Personal Hub 鍥炴粴寮€濮?=="
+echo "鐩爣鐗堟湰锛?TARGET_COMMIT"
 
-npm run backup:data || echo "提醒：回滚前备份失败，请手动确认数据状态。"
+npm run backup:data || echo "鎻愰啋锛氬洖婊氬墠澶囦唤澶辫触锛岃鎵嬪姩纭鏁版嵁鐘舵€併€?
 git checkout "$TARGET_COMMIT"
 docker compose up -d --build
 docker compose ps
 curl -fsS "$HEALTH_URL" >/dev/null
 
-echo "== 回滚完成 =="
-echo "当前版本：$(git rev-parse --short HEAD)"
+echo "== 鍥炴粴瀹屾垚 =="
+echo "褰撳墠鐗堟湰锛?(git rev-parse --short HEAD)"
