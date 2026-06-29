@@ -516,21 +516,41 @@ function getBillImportSignature(bill) {
 }
 
 function filterDuplicateBills(importedBills, existingBills = []) {
-  const seen = new Set((existingBills || []).map(getBillImportSignature).filter(Boolean));
+  const existingEntries = new Map();
+  (existingBills || []).forEach((bill) => {
+    const signature = getBillImportSignature(bill);
+    if (signature && !existingEntries.has(signature)) existingEntries.set(signature, bill);
+  });
+  const existingSeen = new Set(existingEntries.keys());
+  const importSeen = new Set();
+  const importEntries = new Map();
   const unique = [];
   const duplicates = [];
+  const existingDuplicates = [];
+  const fileDuplicates = [];
+  const existingDuplicatePairs = [];
+  const fileDuplicatePairs = [];
 
   importedBills.forEach((bill) => {
     const signature = getBillImportSignature(bill);
-    if (signature && seen.has(signature)) {
+    if (signature && existingSeen.has(signature)) {
       duplicates.push(bill);
+      existingDuplicates.push(bill);
+      existingDuplicatePairs.push({ imported: bill, existing: existingEntries.get(signature) || null });
       return;
     }
-    if (signature) seen.add(signature);
+    if (signature && importSeen.has(signature)) {
+      duplicates.push(bill);
+      fileDuplicates.push(bill);
+      fileDuplicatePairs.push({ imported: bill, existing: importEntries.get(signature) || null });
+      return;
+    }
+    if (signature) importSeen.add(signature);
+    if (signature && !importEntries.has(signature)) importEntries.set(signature, bill);
     unique.push(bill);
   });
 
-  return { unique, duplicates };
+  return { unique, duplicates, existingDuplicates, fileDuplicates, existingDuplicatePairs, fileDuplicatePairs };
 }
 
 function summarizeImportedBills(bills = [], field, fallback = "未指定") {
@@ -571,6 +591,22 @@ function summarizeImportOptions(options = {}) {
   ];
 }
 
+function summarizeBillClassificationReport(report = {}) {
+  return [
+    `- 自动分类：${report.autoCategorized || 0} 条`,
+    `- 记忆规则命中：${report.memoryMatched || 0} 条`,
+    `- 待确认分类：${report.needsReview || 0} 条`,
+    `- 未分类：${report.uncategorized || 0} 条`,
+  ];
+}
+
+function summarizeBillDuplicateReport(report = {}) {
+  const existing = report.existingDuplicates || 0;
+  const inFile = report.fileDuplicates || 0;
+  if (!existing && !inFile) return ["- 未发现重复账单"];
+  return [`- 与已有数据重复：${existing} 条`, `- 文件内部重复：${inFile} 条`];
+}
+
 function summarizeErrors(errors = []) {
   if (!errors.length) return ["- 未发现格式错误"];
   return [
@@ -602,6 +638,9 @@ function buildImportReport(grouped, errors, sheetReports, contactReport, billRep
     "",
     "生活收支月份：",
     ...summarizeBillMonths(grouped.bills),
+    "",
+    "分类识别：",
+    ...summarizeBillClassificationReport(billReport.classification || {}),
     "",
     "工作表识别：",
     ...sheetReports.map((item) => `- ${item.sheetName}：${item.typeLabel}，读取 ${item.rowCount} 行`),
@@ -793,7 +832,7 @@ export function createBillExcelController(app, renderer) {
       );
       if (!confirmed) return;
 
-      app.store.importBills(grouped.bills);
+      const importedBillReport = app.store.importBills(grouped.bills);
       const contactMap = new Map();
       const nameMap = new Map();
       const contactReport = { reused: 0, created: 0, skippedContacts: 0 };
@@ -828,8 +867,61 @@ export function createBillExcelController(app, renderer) {
       });
 
       grouped.subscriptions.forEach((item) => app.store.addSubscription(item));
+      const importedMonths = [...new Set(grouped.bills.map((bill) => String(bill.date || "").slice(0, 7)).filter(Boolean))].sort().reverse();
+      app.store.saveBillImportReport?.({
+        source: options.defaultSource || "自动识别",
+        payer: options.defaultPayer || "家庭账户",
+        imported: importedBillReport?.count ?? grouped.bills.length,
+        skipped: billImport.duplicates.length,
+        existingDuplicates: billImport.existingDuplicates.length,
+        fileDuplicates: billImport.fileDuplicates.length,
+        autoCategorized: importedBillReport?.autoCategorized || 0,
+        memoryMatched: importedBillReport?.memoryMatched || 0,
+        needsReview: importedBillReport?.needsReview || 0,
+        uncategorized: importedBillReport?.uncategorized || 0,
+        errors: errors.length,
+        monthCount: importedMonths.length,
+        contactCount: grouped.contacts.length,
+        favorCount: grouped.favors.length,
+        subscriptionCount: grouped.subscriptions.length,
+        months: importedMonths,
+        sheetReports,
+        errorSamples: errors,
+        duplicateSamples: [
+          ...billImport.existingDuplicatePairs.map((pair) => ({
+            reason: "与已有数据重复",
+            imported: {
+              date: pair.imported?.date || "",
+              title: pair.imported?.title || "",
+              amount: Number(pair.imported?.amount || 0),
+              source: pair.imported?.source || "",
+            },
+            existing: {
+              date: pair.existing?.date || "",
+              title: pair.existing?.title || "",
+              amount: Number(pair.existing?.amount || 0),
+              source: pair.existing?.source || "",
+            },
+          })),
+          ...billImport.fileDuplicatePairs.map((pair) => ({
+            reason: "文件内部重复",
+            imported: {
+              date: pair.imported?.date || "",
+              title: pair.imported?.title || "",
+              amount: Number(pair.imported?.amount || 0),
+              source: pair.imported?.source || "",
+            },
+            existing: {
+              date: pair.existing?.date || "",
+              title: pair.existing?.title || "",
+              amount: Number(pair.existing?.amount || 0),
+              source: pair.existing?.source || "",
+            },
+          })),
+        ],
+      });
       renderer.render();
-      window.alert(buildImportReport(grouped, errors, sheetReports, contactReport, { imported: grouped.bills.length, duplicates: billImport.duplicates.length }, options));
+      window.alert("导入完成，已在生活收支的导入报告中生成校验结果。");
     } catch (error) {
       window.alert(`导入失败：${error instanceof Error ? error.message : "文件无法解析"}`);
     }

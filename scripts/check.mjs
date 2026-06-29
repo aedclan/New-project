@@ -90,7 +90,7 @@ const requiredSnippets = [
   '<nav class="nav-list" id="navList"></nav>',
   'class="account-version-badge" id="appVersionBadge"',
   '<title>个人工作台</title>',
-  'placeholder="搜索事项、账单、笔记、项目集..."',
+  'placeholder="搜索事项、账单、订阅、人情..."',
 ];
 
 const missingSnippets = requiredSnippets.filter((snippet) => !html.includes(snippet));
@@ -135,8 +135,6 @@ const requiredRendererSnippets = [
   "bill-source",
   "bill-payer",
   "bill-fixed",
-  "账单明细",
-  "导入后复核",
   "function renderSubscriptions",
   "function renderFavors",
   "function renderNotes",
@@ -250,7 +248,7 @@ const subscriptionEnhancementSnippets = [
   "reviewSubscription",
   "data-subscription-review",
   "reviewQueue",
-  "订阅复盘队列",
+  "订阅详情卡片",
   "nextReviewDate",
   "renderSubscriptionForm",
   "subscription-workbench",

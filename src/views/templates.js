@@ -245,49 +245,55 @@ export function subscriptionCard(item) {
   const usageLabels = { high: "高频", occasional: "偶尔", rare: "少用", unknown: "未记录" };
   const necessityLabels = { essential: "必需", replaceable: "可替代", optional: "可取消", unknown: "未判断" };
   return `
-    <article class="content-card subscription-card subscription-card--${escapeHtml(item.level || "normal")}">
-      <div class="cover">
+    <article class="content-card subscription-card subscription-info-card subscription-card--${escapeHtml(item.level || "normal")}">
+      <div class="subscription-info-card__top">
         <span>${escapeHtml(item.category || "订阅")}</span>
         <strong>${escapeHtml(item.reminderLabel || renewalLabel)}</strong>
       </div>
-      <div>
-        <h3>${escapeHtml(item.name)}</h3>
-        <p>${escapeHtml(item.note || "暂无订阅备注")}</p>
+      <div class="subscription-info-card__main">
+        <div>
+          <h3>${escapeHtml(item.name)}</h3>
+          <p>${escapeHtml(item.note || "暂无订阅备注")}</p>
+        </div>
+        <div class="subscription-info-card__price">
+          <strong>${formatCurrency(item.amount)}</strong>
+          <span>月均 ${formatCurrency(item.monthlyCost || item.amount)}</span>
+        </div>
       </div>
-      <div class="meta-row">
-        <span class="tag">${escapeHtml(cycleLabel)}</span>
-        ${item.autoRenew ? '<span class="tag">自动续费</span>' : '<span class="tag">手动续费</span>'}
-        <span class="tag">${escapeHtml(item.status || "active")}</span>
+      <div class="subscription-info-card__chips">
+        <span>${escapeHtml(cycleLabel)}</span>
+        <span>${item.autoRenew ? "自动续费" : "手动续费"}</span>
+        <span>${escapeHtml(item.status || "active")}</span>
+        ${item.websiteUrl ? `<span>网址 ${escapeHtml(item.websiteUrl)}</span>` : ""}
+        ${item.accountName ? `<span>账号 ${escapeHtml(item.accountName)}</span>` : ""}
+        ${item.accountPassword ? "<span>密码已保存</span>" : ""}
+        <span>年化 ${formatCurrency(item.annualCost || 0)}</span>
+        <span>到期 ${escapeHtml(item.nextRenewalDate || "未设置")}</span>
+        <span>${escapeHtml(usageLabels[item.usageFrequency] || usageLabels.unknown)}</span>
+        <span>${escapeHtml(necessityLabels[item.necessity] || necessityLabels.unknown)}</span>
+        ${item.satisfaction ? `<span>满意 ${escapeHtml(String(item.satisfaction))}/5</span>` : ""}
+        ${item.nextReviewDate ? `<span>复盘 ${escapeHtml(item.nextReviewDate)}</span>` : ""}
+        ${item.lastBillDate ? `<span>已记账 ${escapeHtml(item.lastBillDate)}</span>` : ""}
+        ${item.lastRenewedAt ? `<span>已续费 ${escapeHtml(item.lastRenewedAt)}</span>` : ""}
+        ${item.lastReviewedAt ? `<span>已复盘 ${escapeHtml(item.lastReviewedAt)}</span>` : ""}
       </div>
-      <div class="tag-row">
-        <span class="tag">${formatCurrency(item.amount)}</span>
-        <span class="tag">月均 ${formatCurrency(item.monthlyCost || item.amount)}</span>
-        <span class="tag">年化 ${formatCurrency(item.annualCost || 0)}</span>
-        <span class="tag">${escapeHtml(item.nextRenewalDate || "未设置")}</span>
-        <span class="tag">${escapeHtml(usageLabels[item.usageFrequency] || usageLabels.unknown)}</span>
-        <span class="tag">${escapeHtml(necessityLabels[item.necessity] || necessityLabels.unknown)}</span>
-        ${item.satisfaction ? `<span class="tag">满意 ${escapeHtml(String(item.satisfaction))}/5</span>` : ""}
-        ${item.nextReviewDate ? `<span class="tag">复盘 ${escapeHtml(item.nextReviewDate)}</span>` : ""}
-        ${item.lastBillDate ? `<span class="tag">已记账 ${escapeHtml(item.lastBillDate)}</span>` : ""}
-        ${item.lastRenewedAt ? `<span class="tag">已续费 ${escapeHtml(item.lastRenewedAt)}</span>` : ""}
-        ${item.lastReviewedAt ? `<span class="tag">已复盘 ${escapeHtml(item.lastReviewedAt)}</span>` : ""}
+      <div class="subscription-info-card__advice">
+        <div>
+          <strong>${escapeHtml(advice.label)}</strong>
+          <span>${escapeHtml(advice.reason)}</span>
+        </div>
+        ${
+          item.review?.reasons?.length
+            ? `<div>
+          <strong>${escapeHtml(item.review.label)}</strong>
+          <span>${escapeHtml(item.review.reasons.join(" / "))}</span>
+        </div>`
+            : ""
+        }
       </div>
-      <div class="subscription-advice subscription-advice--${escapeHtml(advice.level)}">
-        <strong>${escapeHtml(advice.label)}</strong>
-        <span>${escapeHtml(advice.reason)}</span>
-      </div>
-      ${
-        item.review?.reasons?.length
-          ? `<div class="subscription-advice subscription-advice--${escapeHtml(item.review.level)}">
-        <strong>${escapeHtml(item.review.label)}</strong>
-        <span>${escapeHtml(item.review.reasons.join(" / "))}</span>
-      </div>`
-          : ""
-      }
-      <div class="topbar-actions">
-        <button class="ghost-button" data-subscription-bill="${escapeHtml(item.id)}" type="button">生成本期账单</button>
+      <div class="subscription-info-card__actions">
+        <button class="ghost-button" data-subscription-bill="${escapeHtml(item.id)}" type="button">生成账单</button>
         <button class="primary-button" data-subscription-renew="${escapeHtml(item.id)}" type="button">确认续费</button>
-        <button class="ghost-button" data-subscription-review="${escapeHtml(item.id)}" type="button">完成复盘</button>
         ${
           item.status === "paused"
             ? `<button class="ghost-button" data-subscription-status="${escapeHtml(item.id)}:active" type="button">恢复</button>`

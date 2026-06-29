@@ -6,6 +6,7 @@ export function getElements() {
     filterRow: document.querySelector("#filterRow"),
     syncBanner: document.querySelector("#syncBanner"),
     navList: document.querySelector("#navList"),
+    sideNavList: document.querySelector("#sideNavList"),
     mobileTabs: document.querySelector("#mobileTabs"),
     globalSearch: document.querySelector("#globalSearch"),
     drawer: document.querySelector("#detailDrawer"),

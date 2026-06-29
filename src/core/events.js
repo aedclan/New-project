@@ -24,6 +24,7 @@ import {
   updateServerUserStatus,
   verifyServerUserEmail,
 } from "./server-auth.js";
+import { applyAuthCoverImage, resetAuthCoverImage, saveAuthCoverImage } from "./auth-cover.js";
 
 function createDefaultFilters() {
   return {
@@ -557,11 +558,181 @@ export function bindEvents(app, elements, renderer, formController, authControll
     if (empty) empty.hidden = visibleCount > 0 || rows.length === 0;
   }
 
+  function getAuthCoverListFromInput() {
+    return String(document.querySelector("#authCoverImageInput")?.value || "")
+      .split(/\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  function setAuthCoverListInput(imageUrls) {
+    const input = document.querySelector("#authCoverImageInput");
+    if (input) input.value = imageUrls.join("\n");
+  }
+
+  function formatFileSize(bytes) {
+    const value = Number(bytes || 0);
+    if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+    if (value >= 1024) return `${Math.ceil(value / 1024)} KB`;
+    return `${value} B`;
+  }
+
+  async function loadAuthCoverLibrary() {
+    const library = document.querySelector("#authCoverLibrary");
+    if (!library || !authController?.isAdmin) return;
+    library.innerHTML = '<div class="auth-cover-library__empty">正在读取封面资源...</div>';
+    try {
+      const response = await fetch("/api/auth-cover/files");
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) {
+        library.innerHTML = `<div class="auth-cover-library__empty">${result.message || "封面资源读取失败。"}</div>`;
+        return;
+      }
+      const files = Array.isArray(result.files) ? result.files : [];
+      if (!files.length) {
+        library.innerHTML = '<div class="auth-cover-library__empty">还没有上传封面。点击“上传封面”添加图片。</div>';
+        return;
+      }
+      library.innerHTML = files
+        .map(
+          (file) => `
+            <article class="auth-cover-file-card">
+              <div class="auth-cover-file-card__image" style="background-image:url('${String(file.path || "").replace(/'/g, "%27")}')"></div>
+              <div class="auth-cover-file-card__body">
+                <strong title="${file.filename || ""}">${file.filename || ""}</strong>
+                <span>${formatFileSize(file.size)} · ${file.updatedAt ? new Date(file.updatedAt).toLocaleString() : "未知时间"}</span>
+                <code>${file.path || ""}</code>
+              </div>
+              <div class="auth-cover-file-card__actions">
+                <button class="ghost-button" data-auth-cover-use="${file.path || ""}" type="button">加入轮播</button>
+                <button class="ghost-button" data-auth-cover-rename="${file.filename || ""}" type="button">重命名</button>
+                <button class="ghost-button danger-button" data-auth-cover-delete="${file.filename || ""}" type="button">删除</button>
+              </div>
+            </article>
+          `,
+        )
+        .join("");
+    } catch (error) {
+      library.innerHTML = `<div class="auth-cover-library__empty">${error.message || "封面资源读取失败。"}</div>`;
+    }
+  }
+
   document.addEventListener("click", async (event) => {
     const pageButton = event.target.closest("[data-page]");
     if (pageButton) {
       resetPageState(app, pageButton.dataset.page);
       persistUiState(app.ui);
+      renderer.render();
+      if (pageButton.dataset.page === "settings") {
+        await loadAuthCoverLibrary();
+      }
+      return;
+    }
+
+    const authCoverButton = event.target.closest("#saveAuthCoverImage, #previewAuthCoverImage, #resetAuthCoverImage, #uploadAuthCoverImage, #refreshAuthCoverLibrary");
+    if (authCoverButton) {
+      if (!authController?.isAdmin) {
+        window.alert("只有管理员可以管理登录封面。");
+        return;
+      }
+      if (authCoverButton.id === "uploadAuthCoverImage") {
+        document.querySelector("#authCoverUploadFile")?.click();
+        return;
+      }
+      if (authCoverButton.id === "refreshAuthCoverLibrary") {
+        await loadAuthCoverLibrary();
+        return;
+      }
+      if (authCoverButton.id === "resetAuthCoverImage") {
+        const imageUrl = resetAuthCoverImage();
+        setAuthCoverListInput([imageUrl]);
+        renderer.render();
+        await loadAuthCoverLibrary();
+        return;
+      }
+      const imageUrls = getAuthCoverListFromInput();
+      if (!imageUrls.length) {
+        window.alert("请填写至少一张图片路径，或点击恢复默认。");
+        return;
+      }
+      if (authCoverButton.id === "previewAuthCoverImage") {
+        applyAuthCoverImage(imageUrls);
+        return;
+      }
+      saveAuthCoverImage(imageUrls);
+      window.alert(`登录封面已保存，共 ${imageUrls.length} 张。`);
+      renderer.render();
+      await loadAuthCoverLibrary();
+      return;
+    }
+
+    const useAuthCoverButton = event.target.closest("[data-auth-cover-use]");
+    if (useAuthCoverButton) {
+      if (!authController?.isAdmin) return;
+      const path = useAuthCoverButton.dataset.authCoverUse;
+      const imageUrls = getAuthCoverListFromInput().filter((item) => item !== path);
+      imageUrls.unshift(path);
+      setAuthCoverListInput(imageUrls);
+      saveAuthCoverImage(imageUrls);
+      applyAuthCoverImage(imageUrls);
+      window.alert("已加入登录轮播，并设为第一张。");
+      return;
+    }
+
+    const renameAuthCoverButton = event.target.closest("[data-auth-cover-rename]");
+    if (renameAuthCoverButton) {
+      if (!authController?.isAdmin) return;
+      const from = renameAuthCoverButton.dataset.authCoverRename;
+      const nextName = window.prompt("请输入新的文件名，保留 jpg/png/gif/webp 后缀：", from);
+      if (!nextName || nextName === from) return;
+      const response = await fetch("/api/auth-cover/rename", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from, to: nextName }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) {
+        window.alert(result.message || "重命名失败。");
+        return;
+      }
+      const oldPath = `/assets/login-covers/${from}`;
+      const nextPath = result.file?.path || `/assets/login-covers/${nextName}`;
+      const imageUrls = getAuthCoverListFromInput().map((item) => (item === oldPath ? nextPath : item));
+      setAuthCoverListInput(imageUrls);
+      saveAuthCoverImage(imageUrls);
+      await loadAuthCoverLibrary();
+      return;
+    }
+
+    const deleteAuthCoverButton = event.target.closest("[data-auth-cover-delete]");
+    if (deleteAuthCoverButton) {
+      if (!authController?.isAdmin) return;
+      const filename = deleteAuthCoverButton.dataset.authCoverDelete;
+      const confirmed = window.confirm(`确定删除 ${filename} 吗？文件会从 assets/login-covers 中移除。`);
+      if (!confirmed) return;
+      const response = await fetch(`/api/auth-cover/file?filename=${encodeURIComponent(filename)}`, { method: "DELETE" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) {
+        window.alert(result.message || "删除失败。");
+        return;
+      }
+      const deletedPath = `/assets/login-covers/${filename}`;
+      const imageUrls = getAuthCoverListFromInput().filter((item) => item !== deletedPath);
+      setAuthCoverListInput(imageUrls);
+      saveAuthCoverImage(imageUrls);
+      await loadAuthCoverLibrary();
+      return;
+    }
+
+    const createBillReviewButton = event.target.closest("[data-create-bill-review]");
+    if (createBillReviewButton) {
+      if (!(await ensureAuth())) return;
+      const noteId = app.store.createBillMonthlyReview(createBillReviewButton.dataset.createBillReview);
+      if (!noteId) {
+        window.alert("生成月度复盘失败，请确认当前月份有可分析数据。");
+        return;
+      }
+      window.alert("月度复盘已保存到笔记。");
       renderer.render();
       return;
     }
@@ -669,6 +840,35 @@ export function bindEvents(app, elements, renderer, formController, authControll
       app.store.completeTask(completeButton.dataset.complete);
       renderer.closeDrawer();
       renderer.render();
+      return;
+    }
+
+    const billTimelineScopeButton = event.target.closest("[data-bill-timeline-scope]");
+    if (billTimelineScopeButton) {
+      app.ui.filters.billTimelineScope = billTimelineScopeButton.dataset.billTimelineScope;
+      persistUiState(app.ui);
+      renderer.render();
+      return;
+    }
+
+    const billTimelineMonthButton = event.target.closest("[data-bill-timeline-month]");
+    if (billTimelineMonthButton) {
+      app.ui.filters.billMonth = billTimelineMonthButton.dataset.billTimelineMonth;
+      app.ui.filters.billTimelineScope = "month";
+      persistUiState(app.ui);
+      renderer.render();
+      return;
+    }
+
+    const billTimelineTodayButton = event.target.closest("[data-bill-timeline-today]");
+    if (billTimelineTodayButton) {
+      app.ui.filters.billMonth = new Date().toISOString().slice(0, 7);
+      app.ui.filters.billTimelineScope = "week";
+      persistUiState(app.ui);
+      renderer.render();
+      requestAnimationFrame(() => {
+        document.querySelector(".bill-time-node.is-active")?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+      });
       return;
     }
 
@@ -1049,8 +1249,84 @@ export function bindEvents(app, elements, renderer, formController, authControll
     }
   });
 
+  let timelineDragState = null;
+
+  document.addEventListener("pointerdown", (event) => {
+    const rail = event.target.closest(".bill-week-timeline__days[data-draggable='true']");
+    if (!rail) return;
+    timelineDragState = {
+      rail,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startScrollLeft: rail.scrollLeft,
+      moved: false,
+    };
+    rail.classList.add("is-dragging");
+    rail.setPointerCapture?.(event.pointerId);
+  });
+
+  document.addEventListener("pointermove", (event) => {
+    if (!timelineDragState || event.pointerId !== timelineDragState.pointerId) return;
+    const deltaX = event.clientX - timelineDragState.startX;
+    if (Math.abs(deltaX) > 3) timelineDragState.moved = true;
+    timelineDragState.rail.scrollLeft = timelineDragState.startScrollLeft - deltaX;
+  });
+
+  document.addEventListener("pointerup", (event) => {
+    if (!timelineDragState || event.pointerId !== timelineDragState.pointerId) return;
+    timelineDragState.rail.classList.remove("is-dragging");
+    timelineDragState.rail.releasePointerCapture?.(event.pointerId);
+    timelineDragState = null;
+  });
+
+  document.addEventListener("pointercancel", (event) => {
+    if (!timelineDragState || event.pointerId !== timelineDragState.pointerId) return;
+    timelineDragState.rail.classList.remove("is-dragging");
+    timelineDragState = null;
+  });
+
   document.addEventListener("change", async (event) => {
     let shouldRender = false;
+
+    if (event.target.id === "authCoverUploadFile") {
+      if (!authController?.isAdmin) {
+        event.target.value = "";
+        window.alert("只有管理员可以上传登录封面。");
+        return;
+      }
+      const [file] = event.target.files || [];
+      event.target.value = "";
+      if (!file) return;
+      const allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+      if (file.type && !allowedTypes.includes(file.type)) {
+        window.alert("仅支持 jpg、png、gif、webp 图片。");
+        return;
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        window.alert("封面图片不能超过 8MB。");
+        return;
+      }
+      try {
+        const formData = new FormData();
+        formData.append("cover", file);
+        const response = await fetch("/api/auth-cover/upload", { method: "POST", body: formData });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.ok || !result.file?.path) {
+          window.alert(result.message || "封面上传失败。");
+          return;
+        }
+        const imageUrls = getAuthCoverListFromInput().filter((item) => item !== result.file.path);
+        imageUrls.unshift(result.file.path);
+        setAuthCoverListInput(imageUrls);
+        saveAuthCoverImage(imageUrls);
+        applyAuthCoverImage(imageUrls);
+        await loadAuthCoverLibrary();
+        window.alert(`封面已上传：${result.file.path}`);
+      } catch (error) {
+        window.alert(error.message || "封面上传失败。");
+      }
+      return;
+    }
 
     if (event.target.id === "billExcelFile") {
       if (!(await ensureAuth())) {
@@ -1239,6 +1515,54 @@ export function bindEvents(app, elements, renderer, formController, authControll
   });
 
   document.addEventListener("submit", async (event) => {
+    if (event.target.id !== "incomeEntryForm") return;
+    event.preventDefault();
+    if (!(await ensureAuth())) return;
+
+    const formData = new FormData(event.target);
+    const billId = app.store.createIncomeBill({
+      incomeType: formData.get("incomeType"),
+      title: formData.get("title"),
+      amount: formData.get("amount"),
+      date: formData.get("date"),
+      payer: formData.get("payer"),
+      source: "手动",
+    });
+    if (!billId) {
+      window.alert("保存收入失败，请确认金额大于 0。");
+      return;
+    }
+    event.target.reset();
+    resetPageState(app, "bills");
+    persistUiState(app.ui);
+    renderer.render();
+  });
+
+  document.addEventListener("submit", async (event) => {
+    if (event.target.id !== "repaymentEntryForm") return;
+    event.preventDefault();
+    if (!(await ensureAuth())) return;
+
+    const formData = new FormData(event.target);
+    const billId = app.store.createRepaymentBill({
+      repaymentType: formData.get("repaymentType"),
+      title: formData.get("title"),
+      amount: formData.get("amount"),
+      date: formData.get("date"),
+      payer: formData.get("payer"),
+      source: "手动",
+    });
+    if (!billId) {
+      window.alert("保存还款失败，请确认金额大于 0。");
+      return;
+    }
+    event.target.reset();
+    resetPageState(app, "bills");
+    persistUiState(app.ui);
+    renderer.render();
+  });
+
+  document.addEventListener("submit", async (event) => {
     if (event.target.id !== "subscriptionBudgetForm") return;
     event.preventDefault();
     if (!(await ensureAuth())) return;
@@ -1353,6 +1677,9 @@ export function bindEvents(app, elements, renderer, formController, authControll
       owner: formData.get("owner"),
       paymentMethod: formData.get("paymentMethod"),
       projectId: formData.get("projectId"),
+      websiteUrl: formData.get("websiteUrl"),
+      accountName: formData.get("accountName"),
+      accountPassword: formData.get("accountPassword"),
       note: formData.get("note"),
       usageFrequency: formData.get("usageFrequency"),
       necessity: formData.get("necessity"),
@@ -1368,4 +1695,10 @@ export function bindEvents(app, elements, renderer, formController, authControll
     persistUiState(app.ui);
     renderer.render();
   });
+
+  if (app.ui.activePage === "settings") {
+    window.requestAnimationFrame(() => {
+      loadAuthCoverLibrary();
+    });
+  }
 }

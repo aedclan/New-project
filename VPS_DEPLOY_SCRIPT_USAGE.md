@@ -1,6 +1,6 @@
 # VPS 一键部署脚本使用说明
 
-更新时间：2026-06-27
+更新时间：2026-06-28
 
 当前 VPS 项目路径：
 
@@ -12,7 +12,7 @@
 
 `scripts/deploy-vps.sh` 是 VPS 上的一键部署脚本。
 
-它的作用是：在 VPS 上自动完成“拉取 GitHub 最新代码、检查项目、备份数据、重建 Docker、检查网站是否正常”的完整流程。
+它的作用是：在 VPS 上自动完成“检查生产配置、备份数据、暂存 VPS 本地代码改动、拉取 GitHub 最新代码、检查项目、重建 Docker、检查网站是否正常”的完整流程。
 
 正常使用方式：
 
@@ -28,14 +28,15 @@ cd /opt/New-project
 1. 进入项目目录 `/opt/New-project`。
 2. 读取 `.env` 环境变量。
 3. 检查生产环境配置。
-4. 运行项目检查。
-5. 部署前先备份数据。
-6. 记录当前 Git 版本，方便出问题时回滚。
-7. 从 GitHub 拉取最新代码。
-8. 重新构建并启动 Docker。
-9. 检查 Docker 容器状态。
-10. 检查本地健康接口 `/healthz`。
-11. 检查域名访问状态。
+4. 部署前先备份数据。
+5. 记录当前 Git 版本，方便出问题时回滚。
+6. 如果 VPS 上有已跟踪文件的本地改动，自动放入 `git stash`。
+7. 从 GitHub 拉取 `origin/main` 最新代码。
+8. 运行项目检查。
+9. 重新构建并启动 Docker。
+10. 检查 Docker 容器状态。
+11. 检查本地健康接口 `/healthz`。
+12. 检查域名访问状态。
 
 ## 三、标准更新流程
 
@@ -174,11 +175,31 @@ git pull --ff-only origin main
 ls -la scripts | grep vps
 ```
 
-### 2. `git pull` 提示本地文件会被覆盖
+### 2. VPS 上有本地文件改动
+
+新版 `deploy-vps.sh` 会自动处理已跟踪文件的本地改动：
+
+```bash
+git stash push --include-untracked=false -m "vps-local-before-deploy-时间"
+```
+
+这可以避免 `docker-compose.yml` 等文件被本地改动阻止拉取。
+
+如果你想查看被暂存的内容：
+
+```bash
+cd /opt/New-project
+git stash list
+git stash show -p stash@{0}
+```
+
+如果确认不需要恢复这些 VPS 本地改动，可以先保留，不急着删除。
+
+### 3. `git pull` 提示本地文件会被覆盖
 
 说明 VPS 上有本地改动。
 
-先备份并暂存：
+如果你还没有更新到新版部署脚本，可以手动备份并暂存：
 
 ```bash
 cd /opt/New-project
@@ -187,7 +208,7 @@ git stash push -m "vps local change before pull" -- docker-compose.yml
 git pull --ff-only origin main
 ```
 
-### 3. 部署后网站打不开
+### 4. 部署后网站打不开
 
 查看容器状态：
 
@@ -198,7 +219,7 @@ docker compose logs --tail=120 personal-hub
 curl http://127.0.0.1:5173/healthz
 ```
 
-### 4. 想确认当前线上版本
+### 5. 想确认当前线上版本
 
 ```bash
 cd /opt/New-project
@@ -206,3 +227,15 @@ git log --oneline -5
 docker compose ps
 ```
 
+### 6. 脚本出现 `#!/usr/bin/env` 或乱码错误
+
+通常是脚本被保存成了带 BOM 或 Windows 换行。项目已加入 `.gitattributes`，会强制 `.sh` 使用 UTF-8 与 LF 换行。
+
+在 VPS 上修复权限并重新执行：
+
+```bash
+cd /opt/New-project
+git pull --ff-only origin main
+chmod +x scripts/deploy-vps.sh scripts/rollback-vps.sh
+./scripts/deploy-vps.sh
+```

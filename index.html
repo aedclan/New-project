@@ -5,39 +5,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>个人工作台</title>
     <link rel="stylesheet" href="styles.css" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="工作台" />
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar" aria-label="主导航">
-        <div class="brand">
-          <div class="brand-mark">P</div>
-          <div>
-            <strong>个人工作台</strong>
-            <span>Content Hub</span>
-          </div>
+      <aside class="side-rail" aria-label="快捷导航">
+        <nav class="side-nav-list" id="sideNavList" aria-label="侧边栏导航"></nav>
+        <div class="side-rail__bottom">
+          <button class="side-tool" data-page="settings" type="button" aria-label="帮助">?</button>
+          <button class="side-tool" data-page="settings" type="button" aria-label="设置">↩</button>
         </div>
-
-        <nav class="nav-list" id="navList"></nav>
-
       </aside>
-
       <main class="workspace">
         <header class="topbar">
+          <div class="brand">
+            <div class="brand-mark">F</div>
+            <div>
+              <strong>Fynix</strong>
+              <span>Personal Hub</span>
+            </div>
+          </div>
+          <nav class="nav-list" id="navList"></nav>
           <label class="search-box" for="globalSearch">
             <span>&#8981;</span>
-            <input id="globalSearch" type="search" placeholder="搜索事项、账单、笔记、项目集..." />
+            <input id="globalSearch" type="search" placeholder="搜索事项、账单、订阅、人情..." />
           </label>
           <div class="topbar-actions">
             <section class="topbar-account-card account-card" id="sidebarAccountCard">
               <span class="eyebrow">当前账号</span>
               <strong id="sidebarAccountName">未登录</strong>
               <small id="sidebarAccountStatus">浏览模式</small>
-              <span class="account-version-badge" id="appVersionBadge">v0.25.0</span>
+              <span class="account-version-badge" id="appVersionBadge">v0.26.0</span>
             </section>
-            <button class="icon-button" id="themeToggle" type="button" aria-label="切换主题">&#9680;</button>
             <button class="ghost-button" id="authButton" type="button">登录</button>
             <button class="primary-button" id="quickAddButton" type="button">+ 新增</button>
           </div>
@@ -90,9 +91,7 @@
             类型
             <select name="type" id="entryType">
               <option value="tasks">事项</option>
-              <option value="notes">笔记</option>
               <option value="bills">生活收支</option>
-              <option value="collections">项目集</option>
             </select>
           </label>
 
@@ -202,6 +201,13 @@
                   <option value="">普通收支</option>
                   <option value="房贷">房贷</option>
                   <option value="车贷">车贷</option>
+                  <option value="信用卡">信用卡</option>
+                  <option value="银行卡">银行卡</option>
+                  <option value="花呗">花呗</option>
+                  <option value="白条">白条</option>
+                  <option value="购物平台分期">购物平台分期</option>
+                  <option value="消费分期">消费分期</option>
+                  <option value="借款">借款</option>
                   <option value="保险">保险</option>
                   <option value="学费">学费</option>
                   <option value="订阅">订阅</option>
@@ -288,8 +294,8 @@
       </form>
     </dialog>
 
-    <dialog class="modal" id="authModal">
-      <form method="dialog" class="modal-panel compact-modal" id="authForm">
+    <dialog class="modal auth-modal" id="authModal">
+      <form method="dialog" class="modal-panel compact-modal auth-panel" id="authForm">
         <div class="drawer-head">
           <div>
             <p class="eyebrow" id="authEyebrow">登录</p>

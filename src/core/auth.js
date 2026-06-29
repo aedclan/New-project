@@ -14,6 +14,7 @@ export function createAuthController(elements) {
   const authIdentityInput = authForm.elements.email || authForm.elements.username;
   const sendRegisterCodeButton = authModal.querySelector("[data-send-register-code]");
   let registerCodeTimer = null;
+  const isLocalDemoHost = ["localhost", "127.0.0.1", "::1", ""].includes(window.location.hostname);
 
   const state = {
     isAuthenticated: localStorage.getItem(AUTH_SESSION_KEY) === "true",
@@ -22,7 +23,7 @@ export function createAuthController(elements) {
     registrationCodeRequired: false,
     formMode: "login",
     authMode: "local",
-    user: null,
+    user: localStorage.getItem(AUTH_SESSION_KEY) === "true" ? { username: DEMO_USER.username } : null,
     sessionChecked: false,
   };
 
@@ -36,6 +37,7 @@ export function createAuthController(elements) {
 
   function renderAuthState() {
     document.body.classList.toggle("is-locked", !state.isAuthenticated);
+    document.body.classList.toggle("auth-gate-active", !state.isAuthenticated);
     authButton.textContent = state.isAuthenticated ? "退出" : "登录";
     const accountName = state.isAuthenticated ? state.user?.email || state.user?.username || DEMO_USER.username : "未登录";
     const accountStatus = state.isAuthenticated
@@ -55,6 +57,7 @@ export function createAuthController(elements) {
   function setFormMode(mode) {
     state.formMode = mode === "register" ? "register" : "login";
     authModeSwitch?.querySelectorAll("[data-auth-mode]").forEach((button) => {
+      button.textContent = button.dataset.authMode === "register" ? "注册" : "登录";
       button.classList.toggle("is-active", button.dataset.authMode === state.formMode);
     });
     authRegisterFields.forEach((field) => {
@@ -63,9 +66,9 @@ export function createAuthController(elements) {
       input?.toggleAttribute("required", state.formMode === "register" && ["confirmPassword", "emailCode"].includes(input.name));
     });
     if (authIdentityInput) {
-      authIdentityInput.type = "email";
-      authIdentityInput.autocomplete = "email";
-      authIdentityInput.placeholder = "name@example.com";
+      authIdentityInput.type = state.formMode === "register" ? "email" : "text";
+      authIdentityInput.autocomplete = state.formMode === "register" ? "email" : "username";
+      authIdentityInput.placeholder = state.formMode === "register" ? "name@example.com" : "邮箱或 admin";
     }
     if (authSubmitButton) authSubmitButton.textContent = state.formMode === "register" ? "注册" : "登录";
     if (authTitle) authTitle.textContent = state.formMode === "register" ? "邮箱注册" : "邮箱登录";
@@ -106,7 +109,7 @@ export function createAuthController(elements) {
     authForm.reset();
     setFormMode(mode);
     updateHint();
-    authModal.showModal();
+    if (!authModal.open) authModal.showModal();
   }
 
   async function logout() {
@@ -119,6 +122,7 @@ export function createAuthController(elements) {
     localStorage.removeItem(AUTH_SESSION_KEY);
     renderAuthState();
     notifyServerLogout();
+    openLogin();
   }
 
   function requireAuth() {
@@ -158,12 +162,13 @@ export function createAuthController(elements) {
     }
     state.sessionChecked = true;
     renderAuthState();
+    if (!state.isAuthenticated) openLogin();
     return state.isAuthenticated;
   }
 
   async function ensureAuth() {
     if (!requireAuth()) return false;
-    if (state.serverConfigured || state.authMode === "server") {
+    if (state.authMode === "server") {
       const isSessionValid = await refreshServerSession();
       if (!isSessionValid) {
         openLogin();
@@ -189,7 +194,13 @@ export function createAuthController(elements) {
   });
 
   authForm.addEventListener("submit", async (event) => {
-    if (event.submitter?.value === "cancel") return;
+    if (event.submitter?.value === "cancel") {
+      if (!state.isAuthenticated) {
+        event.preventDefault();
+        authHint.textContent = "请先登录或注册账号，登录后才能进入工作台。";
+      }
+      return;
+    }
     event.preventDefault();
 
     const formData = new FormData(authForm);
@@ -231,6 +242,16 @@ export function createAuthController(elements) {
         authHint.textContent = error.message || "注册失败。";
         return;
       }
+    }
+
+    if (isLocalDemoHost && identity === DEMO_USER.username && password === DEMO_USER.password) {
+      state.isAuthenticated = true;
+      state.authMode = "local";
+      state.user = { username: identity };
+      localStorage.setItem(AUTH_SESSION_KEY, "true");
+      authModal.close();
+      renderAuthState();
+      return;
     }
 
     if (state.serverConfigured) {
@@ -333,11 +354,18 @@ export function createAuthController(elements) {
     }
   });
 
+  authModal.addEventListener("cancel", (event) => {
+    if (state.isAuthenticated) return;
+    event.preventDefault();
+    authHint.textContent = "请先登录或注册账号，登录后才能进入工作台。";
+  });
+
   setFormMode("login");
   renderAuthState();
+  if (!state.isAuthenticated) window.setTimeout(() => openLogin(), 0);
 
   window.addEventListener("focus", () => {
-    if (state.serverConfigured || state.authMode === "server") {
+    if (state.authMode === "server") {
       refreshServerSession({ silent: true });
     }
   });
@@ -356,10 +384,13 @@ export function createAuthController(elements) {
       return state.authMode;
     },
     get isAdmin() {
-      return state.isAuthenticated && state.authMode === "server" && state.user?.role === "admin";
+      if (!state.isAuthenticated) return false;
+      if (state.authMode === "server") return state.user?.role === "admin";
+      return state.authMode === "local" && (state.user?.username || DEMO_USER.username) === DEMO_USER.username;
     },
     requireAuth,
     ensureAuth,
     refreshServerSession,
+    openLogin,
   };
 }

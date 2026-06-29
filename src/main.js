@@ -2,6 +2,7 @@ import { DEFAULT_SORT_BY_PAGE, UI_STATE_KEY } from "./config/constants.js";
 import { APP_VERSION } from "./config/version.js";
 import { getElements } from "./core/dom.js";
 import { createAutoServerSync } from "./core/auto-server-sync.js";
+import { applyAuthCoverImage } from "./core/auth-cover.js";
 import { createAuthController } from "./core/auth.js";
 import { bindEvents, initializeTheme } from "./core/events.js";
 import { createFormController } from "./core/form-controller.js";
@@ -85,6 +86,7 @@ if (versionBadge) {
 }
 
 document.body.classList.add("app-ready");
+applyAuthCoverImage();
 initializeTheme();
 bindEvents(app, elements, renderer, formController, authController, billExcelController);
 renderer.render();

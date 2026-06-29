@@ -21,13 +21,20 @@ source .env
 set +a
 
 node scripts/check-production-env.mjs
-npm run check
 npm run backup:data
 
 PREVIOUS_COMMIT="$(git rev-parse --short HEAD)"
 echo "$PREVIOUS_COMMIT" > .last-deploy-commit
 
-git pull --ff-only
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+  STASH_NAME="vps-local-before-deploy-$(date +%Y%m%d-%H%M%S)"
+  echo "Local tracked changes detected. Stashing as: $STASH_NAME"
+  git stash push --include-untracked=false -m "$STASH_NAME"
+fi
+
+git fetch origin
+git pull --ff-only origin main
+npm run check
 docker compose up -d --build
 docker compose ps
 

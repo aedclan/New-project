@@ -7,6 +7,9 @@ export const SUBSCRIPTION_NOTIFICATION_LOG_KEY = "personal-hub-subscription-noti
 export const SERVER_SYNC_TOKEN_KEY = "personal-hub-server-sync-token";
 export const SERVER_SYNC_AUTO_KEY = "personal-hub-server-sync-auto";
 export const SERVER_SYNC_LAST_PUSH_KEY = "personal-hub-server-sync-last-push";
+export const AUTH_COVER_IMAGE_KEY = "personal-hub-auth-cover-image";
+export const DEFAULT_AUTH_COVER_IMAGE =
+  "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80";
 
 export const DEFAULT_SORT_BY_PAGE = {
   dashboard: "updated-desc",
