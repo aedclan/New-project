@@ -128,16 +128,11 @@ const securityDeployDoc = readFileSync("DATA_SECURITY_AND_DEPLOYMENT.md", "utf8"
 const requiredRendererSnippets = [
   "function renderDashboard",
   "function renderBills",
-  "function billScopeOverviewPanel",
-  "function billImportReviewPanel",
-  "function payerBalancePanel",
-  "function mortgageDetailList",
   "bill-source",
   "bill-payer",
   "bill-fixed",
   "function renderSubscriptions",
   "function renderFavors",
-  "function renderNotes",
   "财务 Excel 管理",
   "downloadBillExcelTemplate",
   "exportFinanceExcel",
@@ -156,10 +151,6 @@ const requiredRendererSnippets = [
   "relationshipLedgerRow",
   "isOverdue",
   "bills: () => renderBills",
-  "月度与累计对照",
-  "承担结构",
-  "房贷明细",
-  "最大固定项",
 ];
 const missingRendererSnippets = requiredRendererSnippets.filter((snippet) => !renderer.includes(snippet));
 if (missingRendererSnippets.length > 0) {

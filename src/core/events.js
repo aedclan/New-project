@@ -595,21 +595,31 @@ export function bindEvents(app, elements, renderer, formController, authControll
       }
       library.innerHTML = files
         .map(
-          (file) => `
+          (file) => {
+            const isVideo = file.mediaType === "video" || /\.(mp4|webm|mov)$/i.test(file.filename || "");
+            const safePath = String(file.path || "").replace(/"/g, "&quot;");
+            const preview = isVideo
+              ? `<video class="auth-cover-file-card__media" src="${safePath}" muted loop playsinline controls></video>`
+              : `<div class="auth-cover-file-card__image" style="background-image:url('${String(file.path || "").replace(/'/g, "%27")}')"></div>`;
+            const useButton = isVideo
+              ? `<span class="auth-cover-file-card__note">视频可上传和删除，登录轮播请使用图片 / GIF / WebP。</span>`
+              : `<button class="ghost-button" data-auth-cover-use="${file.path || ""}" type="button">加入轮播</button>`;
+            return `
             <article class="auth-cover-file-card">
-              <div class="auth-cover-file-card__image" style="background-image:url('${String(file.path || "").replace(/'/g, "%27")}')"></div>
+              ${preview}
               <div class="auth-cover-file-card__body">
                 <strong title="${file.filename || ""}">${file.filename || ""}</strong>
-                <span>${formatFileSize(file.size)} · ${file.updatedAt ? new Date(file.updatedAt).toLocaleString() : "未知时间"}</span>
+                <span>${isVideo ? "视频" : "图片"} · ${formatFileSize(file.size)} · ${file.updatedAt ? new Date(file.updatedAt).toLocaleString() : "未知时间"}</span>
                 <code>${file.path || ""}</code>
               </div>
               <div class="auth-cover-file-card__actions">
-                <button class="ghost-button" data-auth-cover-use="${file.path || ""}" type="button">加入轮播</button>
+                ${useButton}
                 <button class="ghost-button" data-auth-cover-rename="${file.filename || ""}" type="button">重命名</button>
                 <button class="ghost-button danger-button" data-auth-cover-delete="${file.filename || ""}" type="button">删除</button>
               </div>
             </article>
-          `,
+          `;
+          },
         )
         .join("");
     } catch (error) {
@@ -629,14 +639,19 @@ export function bindEvents(app, elements, renderer, formController, authControll
       return;
     }
 
-    const authCoverButton = event.target.closest("#saveAuthCoverImage, #previewAuthCoverImage, #resetAuthCoverImage, #uploadAuthCoverImage, #refreshAuthCoverLibrary");
+    const authCoverButton = event.target.closest("#saveAuthCoverImage, #previewAuthCoverImage, #resetAuthCoverImage, #openAuthCoverManager, #closeAuthCoverManager, #refreshAuthCoverLibrary");
     if (authCoverButton) {
       if (!authController?.isAdmin) {
         window.alert("只有管理员可以管理登录封面。");
         return;
       }
-      if (authCoverButton.id === "uploadAuthCoverImage") {
-        document.querySelector("#authCoverUploadFile")?.click();
+      if (authCoverButton.id === "openAuthCoverManager") {
+        document.querySelector("#authCoverManagerModal")?.showModal();
+        await loadAuthCoverLibrary();
+        return;
+      }
+      if (authCoverButton.id === "closeAuthCoverManager") {
+        document.querySelector("#authCoverManagerModal")?.close();
         return;
       }
       if (authCoverButton.id === "refreshAuthCoverLibrary") {
@@ -683,7 +698,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     if (renameAuthCoverButton) {
       if (!authController?.isAdmin) return;
       const from = renameAuthCoverButton.dataset.authCoverRename;
-      const nextName = window.prompt("请输入新的文件名，保留 jpg/png/gif/webp 后缀：", from);
+      const nextName = window.prompt("请输入新的文件名，保留 jpg/png/gif/webp/mp4/webm/mov 后缀：", from);
       if (!nextName || nextName === from) return;
       const response = await fetch("/api/auth-cover/rename", {
         method: "PATCH",
@@ -1297,9 +1312,9 @@ export function bindEvents(app, elements, renderer, formController, authControll
       const [file] = event.target.files || [];
       event.target.value = "";
       if (!file) return;
-      const allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+      const allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/webm", "video/quicktime"];
       if (file.type && !allowedTypes.includes(file.type)) {
-        window.alert("仅支持 jpg、png、gif、webp 图片。");
+        window.alert("仅支持 jpg、png、gif、webp、mp4、webm、mov 文件。");
         return;
       }
       if (file.size > 8 * 1024 * 1024) {
@@ -1316,12 +1331,14 @@ export function bindEvents(app, elements, renderer, formController, authControll
           return;
         }
         const imageUrls = getAuthCoverListFromInput().filter((item) => item !== result.file.path);
-        imageUrls.unshift(result.file.path);
-        setAuthCoverListInput(imageUrls);
-        saveAuthCoverImage(imageUrls);
-        applyAuthCoverImage(imageUrls);
+        if (result.file.mediaType !== "video") {
+          imageUrls.unshift(result.file.path);
+          setAuthCoverListInput(imageUrls);
+          saveAuthCoverImage(imageUrls);
+          applyAuthCoverImage(imageUrls);
+        }
         await loadAuthCoverLibrary();
-        window.alert(`封面已上传：${result.file.path}`);
+        window.alert(`${result.file.mediaType === "video" ? "视频" : "封面"}已上传：${result.file.path}`);
       } catch (error) {
         window.alert(error.message || "封面上传失败。");
       }

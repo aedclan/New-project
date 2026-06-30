@@ -1,4 +1,4 @@
-﻿import { escapeHtml, excerptText, formatCurrency, isWithinLastDays, renderMarkdown } from "../core/utils.js";
+﻿import { escapeHtml, excerptText, formatCurrency, renderMarkdown } from "../core/utils.js";
 import {
   getSubscriptionReminderSummary,
   groupSubscriptionReminders,
@@ -11,10 +11,7 @@ import { navItems } from "../data/nav-items.js";
 import {
   billRow,
   budgetProgressCard,
-  categoryBars,
-  contentCard,
   emptyState,
-  noteRow,
   recentViewRow,
   searchResultCard,
   statCard,
@@ -61,21 +58,7 @@ const pageSortOptions = {
     { value: "amount-asc", label: "金额从低到高" },
     { value: "title-asc", label: "按标题" },
   ],
-  notes: [
-    { value: "updated-desc", label: "最近更新" },
-    { value: "title-asc", label: "按标题" },
-    { value: "pinned-desc", label: "置顶优先" },
-  ],
-  collections: [
-    { value: "updated-desc", label: "最近更新" },
-    { value: "progress-desc", label: "进度优先" },
-    { value: "title-asc", label: "按标题" },
-  ],
   favorites: [
-    { value: "updated-desc", label: "最近更新" },
-    { value: "title-asc", label: "按标题" },
-  ],
-  analytics: [
     { value: "updated-desc", label: "最近更新" },
     { value: "title-asc", label: "按标题" },
   ],
@@ -296,24 +279,6 @@ function getQuickFilters(page, data) {
     return [];
   }
 
-  if (page === "notes") {
-    return [
-      { value: "all", label: "全部" },
-      { value: "note-type:note", label: "笔记" },
-      { value: "note-type:idea", label: "灵感" },
-      { value: "note-type:link", label: "链接" },
-      { value: "pinned", label: "置顶" },
-      ...uniqueValues(data.notes, (item) => item.category).slice(0, 2).map((category) => ({ value: `category:${category}`, label: category })),
-    ];
-  }
-
-  if (page === "collections") {
-    return [
-      { value: "all", label: "全部" },
-      ...uniqueValues(data.collections, (item) => item.status).map((status) => ({ value: `status:${status}`, label: status })),
-    ];
-  }
-
   if (page === "favorites") {
     return [
       { value: "all", label: "全部收藏" },
@@ -327,13 +292,6 @@ function getQuickFilters(page, data) {
 function getStatusOptions(page, data) {
   if (page === "tasks") {
     return uniqueValues(data.tasks, (item) => item.status).map((status) => ({
-      value: `status:${status}`,
-      label: status,
-    }));
-  }
-
-  if (page === "collections") {
-    return uniqueValues(data.collections, (item) => item.status).map((status) => ({
       value: `status:${status}`,
       label: status,
     }));
@@ -361,10 +319,6 @@ function getStatusOptions(page, data) {
     ];
   }
 
-  if (page === "notes") {
-    return [{ value: "pinned", label: "置顶" }];
-  }
-
   if (page === "search") {
     const allItems = getAllItems(data);
     const statusOptions = uniqueValues(allItems, (item) => item.status).map((status) => ({
@@ -384,7 +338,7 @@ function getStatusOptions(page, data) {
 
 function getTagOptions(page, data, ui) {
   const source =
-    page === "search" || page === "analytics"
+    page === "search"
       ? filterCollection(getAllItems(data), ui)
       : page === "favorites"
         ? data.bookmarks || []
@@ -397,7 +351,7 @@ function getTagOptions(page, data, ui) {
 }
 
 function renderControls(elements, data, ui, page) {
-  const hiddenTopControls = new Set(["notes", "tasks", "bills"]);
+  const hiddenTopControls = new Set(["tasks", "bills"]);
   if (hiddenTopControls.has(page)) {
     elements.filterRow.innerHTML = "";
     return;
@@ -407,7 +361,7 @@ function renderControls(elements, data, ui, page) {
   const compactControls = page === "subscriptions";
   const statusOptions = compactControls ? [] : getStatusOptions(page, data);
   const tagOptions = compactControls ? [] : getTagOptions(page, data, ui);
-  const showTypeFilter = page === "search" || page === "analytics";
+  const showTypeFilter = page === "search";
   const statusLabel = page === "bills" ? "筛选" : "状态";
 
   elements.filterRow.innerHTML = `
@@ -628,18 +582,6 @@ function renderDashboard(elements, data, ui, recentViews, store) {
   `;
 }
 
-function renderCardPage(elements, data, ui, type) {
-  renderControls(elements, data, ui, type);
-  const items = filteredItems(data, ui, type);
-  const label = typeMeta[type].label;
-
-  elements.contentArea.innerHTML = `
-    <div class="card-grid">
-      ${items.map((item) => contentCard(item, type, label)).join("") || emptyState(`暂无${label}`)}
-    </div>
-  `;
-}
-
 function timelineRows(items) {
   return `
     <div class="timeline-list">
@@ -658,104 +600,6 @@ function timelineRows(items) {
           )
           .join("") || emptyState("暂无项目动态")
       }
-    </div>
-  `;
-}
-
-function projectOverviewCard(overview) {
-  const project = overview.project;
-  return `
-    <article class="project-card" data-open="collections:${project.id}" tabindex="0">
-      <div class="meta-row">
-        <span class="tag">${escapeHtml(project.status || "规划中")}</span>
-        <span>${escapeHtml(project.updatedAt || "")}</span>
-      </div>
-      <div>
-        <h3>${escapeHtml(project.title)}</h3>
-        <p>${escapeHtml(project.description || "暂无说明")}</p>
-      </div>
-      <div class="project-meter">
-        <div class="meta-row">
-          <span>事项进度</span>
-          <strong>${overview.taskProgress}%</strong>
-        </div>
-        <div class="bar-track"><span class="bar-fill" style="width:${Math.min(Math.max(overview.taskProgress, 0), 100)}%"></span></div>
-      </div>
-      <div class="project-metrics">
-        <span>事项 ${overview.tasks.length}</span>
-        <span>账单 ${overview.bills.length}</span>
-        <span>笔记 ${overview.notes.length}</span>
-        <span>人情 ${overview.favorEvents.length}</span>
-      </div>
-      <div class="tag-row">
-        <span class="tag">支出 ${formatCurrency(overview.expense)}</span>
-        <span class="tag">结余 ${formatCurrency(overview.balance)}</span>
-        <span class="tag">订阅 ${overview.subscriptions.length}</span>
-      </div>
-    </article>
-  `;
-}
-
-function renderCollections(elements, data, ui, store) {
-  renderControls(elements, data, ui, "collections");
-  const projectItems = filteredItems(data, ui, "collections");
-  const overviews = projectItems.map((project) => store.getProjectOverview(project.id)).filter(Boolean);
-  const totalExpense = overviews.reduce((sum, overview) => sum + overview.expense, 0);
-  const totalLinked = overviews.reduce((sum, overview) => sum + overview.totalLinked, 0);
-  const avgProgress = overviews.length
-    ? Math.round(overviews.reduce((sum, overview) => sum + Number(overview.taskProgress || 0), 0) / overviews.length)
-    : 0;
-  const latestTimeline = overviews.flatMap((overview) => overview.timeline).slice(0, 10);
-
-  elements.contentArea.innerHTML = `
-    <div class="stats-grid">
-      ${statCard("项目数量", overviews.length, "当前筛选范围")}
-      ${statCard("平均进度", `${avgProgress}%`, "按关联事项计算")}
-      ${statCard("项目支出", formatCurrency(totalExpense), "关联账单支出")}
-      ${statCard("关联内容", totalLinked, "事项、账单、笔记、人情与订阅")}
-    </div>
-    <section class="panel">
-      <div class="panel-head">
-        <h2>项目总览</h2>
-        <span class="results-count">自动汇总关联内容</span>
-      </div>
-      <div class="project-grid">
-        ${overviews.map(projectOverviewCard).join("") || emptyState("暂无项目集")}
-      </div>
-    </section>
-    <div class="two-col">
-      <section class="panel">
-        <div class="panel-head">
-          <h2>项目时间线</h2>
-          <span class="results-count">最近动态</span>
-        </div>
-        ${timelineRows(latestTimeline)}
-      </section>
-      <section class="panel">
-        <div class="panel-head">
-          <h2>项目关联摘要</h2>
-          <span class="results-count">按模块查看上下文</span>
-        </div>
-        <div class="list-stack">
-          ${
-            overviews
-              .slice(0, 6)
-              .map(
-                (overview) => `
-                  <article class="search-result-card" data-open="collections:${escapeHtml(overview.project.id)}">
-                    <div class="meta-row">
-                      <span class="tag">${escapeHtml(overview.project.status || "规划中")}</span>
-                      <span>${overview.taskProgress}%</span>
-                    </div>
-                    <strong>${escapeHtml(overview.project.title)}</strong>
-                    <p>事项 ${overview.tasks.length} · 账单 ${overview.bills.length} · 笔记 ${overview.notes.length} · 人情 ${overview.favorEvents.length}</p>
-                  </article>
-                `,
-              )
-              .join("") || emptyState("暂无项目摘要")
-          }
-        </div>
-      </section>
     </div>
   `;
 }
@@ -2367,119 +2211,6 @@ function renderFavors(elements, data, ui, store) {
   `;
 }
 
-function renderNotes(elements, data, ui) {
-  renderControls(elements, data, ui, "notes");
-  const items = filteredItems(data, ui, "notes");
-  const ideaNotes = data.notes.filter((item) => item.noteType === "idea").slice(0, 4);
-  const linkNotes = data.notes.filter((item) => item.noteType === "link").slice(0, 4);
-  const weeklyNotes = data.notes.filter((item) => isWithinLastDays(item.createdAt || item.updatedAt, 7)).slice(0, 4);
-  const markdownPreview = renderMarkdown([
-    "# Markdown 预览",
-    "",
-    "## 笔记结构",
-    "- 支持标题",
-    "- 支持列表",
-    "- 支持引用和代码",
-    "",
-    "访问 [Mobbin](https://mobbin.com)",
-  ].join("\n"));
-
-  elements.contentArea.innerHTML = `
-    <section class="panel">
-      <div class="panel-head">
-        <h2>快速记录</h2>
-        <span class="results-count">用于灵感、链接和碎片想法</span>
-      </div>
-      <form class="quick-note-form" id="quickNoteForm">
-        <div class="form-grid">
-          <label>
-            标题
-            <input name="title" placeholder="可留空，系统会自动生成标题" />
-          </label>
-          <label>
-            类型
-            <select name="noteType">
-              <option value="idea">灵感</option>
-              <option value="note">笔记</option>
-              <option value="link">链接</option>
-              <option value="summary">回顾</option>
-            </select>
-          </label>
-        </div>
-        <label>
-          摘要
-          <input name="description" placeholder="一句话说明这条记录的重点" />
-        </label>
-        <label>
-          主要内容
-          <textarea name="content" rows="5" placeholder="支持基础 Markdown，例如标题、列表、引用、链接"></textarea>
-        </label>
-        <div class="form-grid">
-          <label>
-            链接地址
-            <input name="sourceUrl" type="url" placeholder="https://example.com" />
-          </label>
-          <label>
-            标签
-            <input name="tags" placeholder="用逗号分隔，例如：灵感,产品" />
-          </label>
-        </div>
-        <div class="topbar-actions">
-          <button class="ghost-button" id="openNoteModal" type="button">打开完整编辑器</button>
-          <button class="primary-button" type="submit">保存记录</button>
-        </div>
-      </form>
-    </section>
-    <div class="stats-grid">
-      ${statCard("本周新增", weeklyNotes.length, "7 天内创建")}
-      ${statCard("灵感池", data.notes.filter((item) => item.noteType === "idea").length, "待整理")}
-      ${statCard("链接收录", data.notes.filter((item) => item.noteType === "link").length, "参考资料")}
-      ${statCard("置顶笔记", data.notes.filter((item) => item.pinned).length, "长期保留")}
-    </div>
-    <div class="two-col">
-      <section class="panel">
-        <div class="panel-head">
-          <h2>灵感池</h2>
-          <span class="results-count">可继续转事项</span>
-        </div>
-        <div class="list-stack">${ideaNotes.map(noteRow).join("") || emptyState("灵感池还没有内容")}</div>
-      </section>
-      <section class="panel">
-        <div class="panel-head">
-          <h2>本周回顾</h2>
-          <span class="results-count">最近 7 天的记录</span>
-        </div>
-        <div class="list-stack">${weeklyNotes.map(noteRow).join("") || emptyState("本周还没有新笔记")}</div>
-      </section>
-    </div>
-    <div class="two-col">
-      <section class="panel">
-        <div class="panel-head">
-          <h2>链接收录</h2>
-          <span class="results-count">适合参考网站和资料</span>
-        </div>
-        <div class="list-stack">${linkNotes.map(noteRow).join("") || emptyState("还没有收录链接")}</div>
-      </section>
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Markdown 预览</h2>
-          <span class="results-count">完整编辑器中也支持预览</span>
-        </div>
-        <div class="markdown-preview note-preview-surface">${markdownPreview}</div>
-      </section>
-    </div>
-    <section class="panel">
-      <div class="panel-head">
-        <h2>全部笔记</h2>
-        <span class="results-count">当前筛选共 ${items.length} 条</span>
-      </div>
-      <div class="list-stack">
-        ${items.map(noteRow).join("") || emptyState("暂无符合条件的笔记")}
-      </div>
-    </section>
-  `;
-}
-
 function bookmarkCard(item) {
   return `
     <article class="content-card bookmark-card">
@@ -2552,25 +2283,6 @@ function renderFavorites(elements, data, ui) {
       </div>
       <div class="card-grid">
         ${items.map(bookmarkCard).join("") || emptyState("还没有外部收藏")}
-      </div>
-    </section>
-  `;
-}
-
-function renderAnalytics(elements, data, ui) {
-  renderControls(elements, data, ui, "analytics");
-  const all = filterCollection(getAllItems(data), ui);
-  const doneTasks = data.tasks.filter((task) => task.status === "已完成").length;
-  const income = data.bills.filter((bill) => bill.type === "收入").reduce((sum, bill) => sum + Number(bill.amount || 0), 0);
-  const expense = data.bills.filter((bill) => bill.type === "支出").reduce((sum, bill) => sum + Number(bill.amount || 0), 0);
-
-  elements.contentArea.innerHTML = `
-    <section class="panel">
-      <div class="stats-grid">
-        ${statCard("全部内容", all.length, "当前搜索范围")}
-        ${statCard("已完成事项", doneTasks, "任务达成")}
-        ${statCard("累计收入", formatCurrency(income), "账单收入")}
-        ${statCard("累计支出", formatCurrency(expense), "账单支出")}
       </div>
     </section>
   `;
@@ -2719,20 +2431,20 @@ function renderSettings(elements, data, ui, authController) {
               <h2>登录封面资源库</h2>
               <span class="results-count">上传 / 轮播 / 重命名 / 删除</span>
             </div>
-            <p class="panel-copy">管理员可以上传本地图片到 assets/login-covers，并把资源加入登录页轮播。支持 jpg、png、gif、webp，单张不超过 8MB。</p>
+            <p class="panel-copy">管理员可以上传本地图片、动图和视频到 assets/login-covers，并在资源管理窗口中删除、重命名或加入登录轮播。</p>
             <div class="auth-cover-manager">
               <div class="auth-cover-preview-card">
                 <div class="auth-cover-preview" style="--auth-cover-preview:url('${escapeHtml(authCoverImage).replace(/'/g, "%27")}')"></div>
                 <div class="auth-cover-upload-row">
-                  <button class="ghost-button" id="uploadAuthCoverImage" type="button">上传封面</button>
-                  <button class="ghost-button" id="refreshAuthCoverLibrary" type="button">刷新资源库</button>
-                  <input id="authCoverUploadFile" type="file" accept="image/jpeg,image/png,image/gif,image/webp,.jpg,.jpeg,.png,.gif,.webp" hidden />
+                  <label class="ghost-button auth-cover-upload-trigger" for="authCoverUploadFile">本地上传</label>
+                  <button class="ghost-button" id="openAuthCoverManager" type="button">管理资源</button>
+                  <input class="auth-cover-file-input" id="authCoverUploadFile" type="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime,.jpg,.jpeg,.png,.gif,.webp,.mp4,.webm,.mov" />
                 </div>
               </div>
               <label class="auth-cover-list-editor">
                 当前登录轮播（一行一张）
                 <textarea id="authCoverImageInput" rows="5" placeholder="/assets/login-covers/cover-1.jpg&#10;/assets/login-covers/cover-2.gif&#10;/assets/login-covers/cover-3.webp">${escapeHtml(authCoverImages.join("\n"))}</textarea>
-                <small>上传后会自动写入第一行；也可以手动填写外部图片 URL。</small>
+                <small>上传后会自动写入第一行；登录背景建议优先使用图片、gif 或 webp。</small>
               </label>
             </div>
             <div class="settings-action-row">
@@ -2740,9 +2452,24 @@ function renderSettings(elements, data, ui, authController) {
               <button class="ghost-button" id="previewAuthCoverImage" type="button">预览</button>
               <button class="ghost-button" id="resetAuthCoverImage" type="button">恢复默认</button>
             </div>
-            <div class="auth-cover-library" id="authCoverLibrary">
-              <div class="auth-cover-library__empty">点击“刷新资源库”查看已上传封面。</div>
-            </div>
+            <dialog class="modal auth-cover-modal" id="authCoverManagerModal">
+              <section class="modal-panel auth-cover-modal__panel">
+                <div class="drawer-head">
+                  <div>
+                    <p class="eyebrow">LOCAL ASSETS</p>
+                    <h2>本地上传资源管理</h2>
+                  </div>
+                  <button class="icon-button" id="closeAuthCoverManager" type="button" aria-label="关闭">&times;</button>
+                </div>
+                <div class="auth-cover-modal__tools">
+                  <label class="ghost-button auth-cover-upload-trigger" for="authCoverUploadFile">上传图片 / 视频</label>
+                  <button class="ghost-button" id="refreshAuthCoverLibrary" type="button">刷新资源库</button>
+                </div>
+                <div class="auth-cover-library" id="authCoverLibrary">
+                  <div class="auth-cover-library__empty">点击“刷新资源库”查看已上传资源。</div>
+                </div>
+              </section>
+            </dialog>
           </section>
 
           <section class="panel settings-section">
@@ -3272,10 +2999,7 @@ export function createRenderer(app, elements) {
         bills: () => renderBills(elements, data, app.ui, app.store),
         subscriptions: () => renderSubscriptions(elements, data, app.ui, app.store),
         favors: () => renderFavors(elements, data, app.ui, app.store),
-        notes: () => renderNotes(elements, data, app.ui),
-        collections: () => renderCollections(elements, data, app.ui, app.store),
         favorites: () => renderFavorites(elements, data, app.ui),
-        analytics: () => renderAnalytics(elements, data, app.ui),
         settings: () => renderSettings(elements, data, app.ui, app.authController),
         search: () => renderSearchResults(elements, data, app.ui),
       };

@@ -295,7 +295,7 @@
     </dialog>
 
     <dialog class="modal auth-modal" id="authModal">
-      <form method="dialog" class="modal-panel compact-modal auth-panel" id="authForm">
+      <form method="dialog" class="auth-panel" id="authForm">
         <div class="drawer-head">
           <div>
             <p class="eyebrow" id="authEyebrow">登录</p>
@@ -340,6 +340,9 @@
           <button class="ghost-button" data-request-password-reset type="button">忘记密码</button>
           <button class="primary-button" value="default" id="authSubmitButton" type="submit">登录</button>
         </div>
+        <section class="auth-cover-side" aria-hidden="true">
+          <div class="auth-cover-image"></div>
+        </section>
       </form>
     </dialog>
     <dialog class="modal" id="contactDetailModal">

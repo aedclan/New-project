@@ -23,6 +23,9 @@ const mimeTypes = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
 };
 
 
@@ -34,6 +37,9 @@ const coverUploadTypes = {
   ".png": "image/png",
   ".gif": "image/gif",
   ".webp": "image/webp",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
 };
 
 function sendJson(response, status, payload) {
@@ -77,7 +83,7 @@ function normalizeCoverFilename(value) {
   if (!filename || filename.startsWith(".")) return "";
   if (!/^[a-zA-Z0-9._-]+$/.test(filename)) return "";
   const ext = extname(filename).toLowerCase();
-  return coverUploadTypes[ext] ? filename : "";
+      return coverUploadTypes[ext] ? filename : "";
 }
 
 function resolveCoverFile(filename) {
@@ -123,6 +129,7 @@ function listAuthCoverFiles() {
       return {
         filename,
         path: "/assets/login-covers/" + filename,
+        mediaType: coverUploadTypes[extname(filename).toLowerCase()]?.startsWith("video/") ? "video" : "image",
         size: stats.size,
         updatedAt: stats.mtime.toISOString(),
       };
@@ -148,18 +155,18 @@ async function handleAuthCoverRequest(request, response) {
       const originalExt = extname(upload?.filename || "").toLowerCase();
       const ext = originalExt === ".jpeg" ? ".jpg" : originalExt;
       if (!upload?.data?.length || !coverUploadTypes[ext]) {
-        sendJson(response, 400, { ok: false, message: "仅支持 jpg、png、gif、webp 图片。" });
+        sendJson(response, 400, { ok: false, message: "仅支持 jpg、png、gif、webp、mp4、webm、mov 文件。" });
         return true;
       }
       if (upload.mimeType && !Object.values(coverUploadTypes).includes(upload.mimeType)) {
-        sendJson(response, 400, { ok: false, message: "图片类型不受支持。" });
+        sendJson(response, 400, { ok: false, message: "文件类型不受支持。" });
         return true;
       }
       mkdirSync(coverUploadDir, { recursive: true });
       const filename = "cover-" + Date.now() + "-" + randomBytes(3).toString("hex") + ext;
       const filePath = resolve(join(coverUploadDir, filename));
       writeFileSync(filePath, upload.data);
-      sendJson(response, 200, { ok: true, file: { filename, path: "/assets/login-covers/" + filename, size: upload.data.length } });
+      sendJson(response, 200, { ok: true, file: { filename, path: "/assets/login-covers/" + filename, mediaType: coverUploadTypes[ext].startsWith("video/") ? "video" : "image", size: upload.data.length } });
       return true;
     }
 
@@ -299,4 +306,3 @@ server.listen(port, host, () => {
   console.log(`Personal Content Hub is running at http://${host}:${port}`);
   startScheduledBackups();
 });
-
