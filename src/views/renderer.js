@@ -472,13 +472,69 @@ function updateProgress(elements, data) {
   elements.sidebarProgressBar.style.width = `${progress}%`;
 }
 
+function dashboardActionAttributes(action = {}) {
+  if (action.ledgerMonth) return `data-dashboard-open-ledger="${escapeHtml(action.ledgerMonth)}"`;
+  return `data-page-jump="${escapeHtml(action.page || "dashboard")}"`;
+}
+
+function dashboardMetricCard(label, value, hint, action, tone = "") {
+  return `
+    <button class="dashboard-metric-card ${tone ? `dashboard-metric-card--${tone}` : ""}" ${dashboardActionAttributes(action)} type="button">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(hint)}</small>
+    </button>
+  `;
+}
+
+function dashboardQueueItem(title, text, actionLabel, action, tone = "normal") {
+  return `
+    <article class="dashboard-queue-item dashboard-queue-item--${escapeHtml(tone)}">
+      <div>
+        <strong>${escapeHtml(title)}</strong>
+        <span>${escapeHtml(text)}</span>
+      </div>
+      <button class="ghost-button" ${dashboardActionAttributes(action)} type="button">${escapeHtml(actionLabel)}</button>
+    </article>
+  `;
+}
+
+function dashboardTrendBars(rows) {
+  const maxValue = Math.max(...rows.flatMap((row) => [row.income, row.expense]), 1);
+  return `
+    <div class="dashboard-trend-bars">
+      ${rows
+        .map((row) => {
+          const incomeHeight = Math.max(6, Math.round((row.income / maxValue) * 72));
+          const expenseHeight = Math.max(6, Math.round((row.expense / maxValue) * 72));
+          return `
+            <article>
+              <div>
+                <i class="dashboard-trend-bar dashboard-trend-bar--income" style="height:${incomeHeight}px"></i>
+                <i class="dashboard-trend-bar dashboard-trend-bar--expense" style="height:${expenseHeight}px"></i>
+              </div>
+              <span>${escapeHtml(row.month.slice(5))}</span>
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
 function renderDashboard(elements, data, ui, recentViews, store) {
   renderControls(elements, data, ui, "dashboard");
 
-  const tasks = filteredItems(data, ui, "tasks");
-  const bills = filteredItems(data, { ...ui, activeChip: "all" }, "bills");
-  const income = bills.filter((bill) => bill.type === "收入").reduce((sum, bill) => sum + Number(bill.amount || 0), 0);
-  const expense = bills.filter((bill) => bill.type === "支出").reduce((sum, bill) => sum + Number(bill.amount || 0), 0);
+  const tasks = data.tasks || [];
+  const bills = data.bills || [];
+  const fallbackMonth = getBillHistoryRows(bills)[0]?.month || data.budgets?.month || new Date().toISOString().slice(0, 7);
+  const month = ui.filters.billMonth || data.budgets?.viewMonth || fallbackMonth;
+  const financeSummary = getMonthlyFinanceSummary(data, month);
+  const commitments = getFutureCommitments(data, month);
+  const financeRisks = buildFinanceRisks(financeSummary, commitments);
+  const futureExpense = commitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const healthStatus =
+    financeSummary.income <= 0 ? "待补录" : financeSummary.balance < 0 || financeRisks.some((risk) => risk.level === "risk") ? "风险" : financeRisks.some((risk) => risk.level === "watch") ? "关注" : "健康";
   const doneTasks = data.tasks.filter((task) => task.status === "已完成").length;
   const progress = Math.round((doneTasks / Math.max(data.tasks.length, 1)) * 100);
   const notificationSettings = loadSubscriptionNotificationSettings();
@@ -488,6 +544,10 @@ function renderDashboard(elements, data, ui, recentViews, store) {
   const pendingTasks = tasks.filter((task) => task.status !== "已完成");
   const todayTasks = pendingTasks.filter((task) => isDueToday(task)).slice(0, 4);
   const overdueTasks = pendingTasks.filter(isOverdue);
+  const unclassifiedBills = bills.filter((bill) => String(bill.date || "").startsWith(month) && !bill.excludeFromAnalysis && (!bill.category || bill.category === "未分类" || bill.classification?.needsReview));
+  const excludedBills = bills.filter((bill) => String(bill.date || "").startsWith(month) && bill.excludeFromAnalysis);
+  const latestImport = (data.billImportReports || [])[0];
+  const trendRows = getBillHistoryRows(bills.filter((bill) => !bill.excludeFromAnalysis)).slice(0, 6).reverse();
   const visibleRecentViews = recentViews.filter((item) => !["notes", "collections", "analytics"].includes(item.type));
   const balanceCopy =
     favorStats.balance > 0
@@ -495,37 +555,43 @@ function renderDashboard(elements, data, ui, recentViews, store) {
       : favorStats.balance < 0
         ? `我差别人 ${formatCurrency(Math.abs(favorStats.balance))}`
         : "往来差额持平";
+  const decisionText =
+    financeSummary.income <= 0
+      ? "先补录本月收入，才能判断支出率。"
+      : financeSummary.balance < 0
+        ? "本月现金流为负，优先复核大额支出。"
+        : `本月结余 ${formatCurrency(financeSummary.balance)}，未来计划 ${formatCurrency(futureExpense)}。`;
+  const queueItems = [
+    unclassifiedBills.length ? dashboardQueueItem("未分类流水", `${month} 有 ${unclassifiedBills.length} 条需要复核`, "复核流水", { ledgerMonth: month }, "risk") : "",
+    subscriptionsOverview.upcoming?.length ? dashboardQueueItem("订阅临期", `30 天内 ${subscriptionsOverview.upcoming.length} 项到期`, "看订阅", { page: "subscriptions" }, subscriptionsOverview.urgent?.length ? "risk" : "watch") : "",
+    overdueTasks.length ? dashboardQueueItem("逾期事项", `${overdueTasks.length} 项已经逾期`, "处理事项", { page: "tasks" }, "risk") : "",
+    latestImport?.needsReview || latestImport?.uncategorized ? dashboardQueueItem("导入待复核", `${latestImport.uncategorized || 0} 条未分类，${latestImport.needsReview || 0} 条需确认`, "打开流水", { ledgerMonth: latestImport.months?.[0] || month }, "watch") : "",
+    !unclassifiedBills.length && !subscriptionsOverview.upcoming?.length && !overdueTasks.length ? dashboardQueueItem("暂无紧急处理", "关键事项处于可控状态", "查看总账", { page: "bills" }, "good") : "",
+  ].filter(Boolean);
 
   elements.contentArea.innerHTML = `
-    <section class="opera-dashboard-hero">
-      <div>
-        <span class="eyebrow">Personal Command Center</span>
-        <h2>今天先看这些</h2>
-        <p>把账单、订阅、人情和事项压缩成一屏摘要，点击任意卡片进入对应工作区。</p>
+    <section class="dashboard-command">
+      <div class="dashboard-command__main">
+        <span class="eyebrow">COMMAND CENTER</span>
+        <h2>家庭财务状态：${escapeHtml(healthStatus)}</h2>
+        <p>${escapeHtml(decisionText)}</p>
+        <div class="dashboard-command__actions">
+          <button class="primary-button" data-dashboard-open-ledger="${escapeHtml(month)}" type="button">复核完整流水</button>
+          <button class="ghost-button" data-page-jump="bills" type="button">进入生活收支</button>
+          <button class="ghost-button" id="dashboardQuickAdd" type="button">新增记录</button>
+        </div>
       </div>
-      <button class="primary-button" id="dashboardQuickAdd" type="button">新增记录</button>
+      <aside class="dashboard-command__status dashboard-command__status--${healthStatus === "风险" ? "risk" : healthStatus === "关注" ? "watch" : "good"}">
+        <span>${escapeHtml(month)} 月度判断</span>
+        <strong>${escapeHtml(healthStatus)}</strong>
+        <small>支出率 ${financeSummary.income > 0 ? `${Math.round(financeSummary.expenseRate * 100)}%` : "缺少收入"} · ${excludedBills.length} 条不计入</small>
+      </aside>
     </section>
-    <div class="opera-metric-grid">
-      <button class="opera-metric-card" data-page-jump="tasks" type="button">
-        <span>待办事项</span>
-        <strong>${pendingTasks.length}</strong>
-        <small>${overdueTasks.length ? `${overdueTasks.length} 项逾期` : `完成率 ${progress}%`}</small>
-      </button>
-      <button class="opera-metric-card" data-page-jump="bills" type="button">
-        <span>本月支出</span>
-        <strong>${formatCurrency(expense)}</strong>
-        <small>收入 ${formatCurrency(income)}</small>
-      </button>
-      <button class="opera-metric-card" data-page-jump="subscriptions" type="button">
-        <span>订阅成本</span>
-        <strong>${formatCurrency(subscriptionsOverview.estimatedMonthlyCost)}</strong>
-        <small>${subscriptionsOverview.upcoming.length} 个 30 天内到期</small>
-      </button>
-      <button class="opera-metric-card" data-page-jump="favors" type="button">
-        <span>人情差额</span>
-        <strong>${formatCurrency(Math.abs(favorStats.balance || 0))}</strong>
-        <small>${balanceCopy}</small>
-      </button>
+    <div class="dashboard-metric-grid">
+      ${dashboardMetricCard("本月结余", formatCurrency(financeSummary.balance), `收入 ${formatCurrency(financeSummary.income)} / 支出 ${formatCurrency(financeSummary.expense)}`, { page: "bills" }, financeSummary.balance < 0 ? "risk" : "good")}
+      ${dashboardMetricCard("预算使用", financeSummary.totalBudget ? `${Math.round((financeSummary.expense / Math.max(financeSummary.totalBudget, 1)) * 100)}%` : "未设置", `${formatCurrency(financeSummary.expense)} / ${formatCurrency(financeSummary.totalBudget)}`, { page: "bills" }, financeSummary.totalBudget && financeSummary.expense > financeSummary.totalBudget ? "risk" : "")}
+      ${dashboardMetricCard("未来压力", formatCurrency(futureExpense), `未来 3 个月 ${commitments.length} 项`, { page: "bills" }, futureExpense > Math.max(financeSummary.balance, 0) + Math.max(financeSummary.income, 0) ? "watch" : "")}
+      ${dashboardMetricCard("待处理", String(queueItems.length), `${overdueTasks.length ? `${overdueTasks.length} 逾期 · ` : ""}${unclassifiedBills.length} 未分类`, unclassifiedBills.length ? { ledgerMonth: month } : { page: "tasks" }, queueItems.length > 2 ? "watch" : "")}
     </div>
     ${
       notificationSettings.siteEnabled && subscriptionSummary.total
@@ -543,42 +609,75 @@ function renderDashboard(elements, data, ui, recentViews, store) {
           </section>`
         : ""
     }
-    <div class="opera-workbench-grid">
-      <section class="panel opera-workbench-card">
+    <div class="dashboard-main-grid">
+      <section class="panel dashboard-panel">
         <div class="panel-head">
           <div>
-            <span class="eyebrow">Tasks</span>
-            <h2>今日事项</h2>
+            <span class="eyebrow">RISK</span>
+            <h2>风险提醒</h2>
           </div>
-          <button class="ghost-button" data-page-jump="tasks" type="button">查看全部</button>
+          <button class="ghost-button" data-dashboard-open-ledger="${escapeHtml(month)}" type="button">完整流水</button>
         </div>
-        <div class="list-stack">${(todayTasks.length ? todayTasks : pendingTasks.slice(0, 4)).map(taskRow).join("") || emptyState("暂无事项")}</div>
-      </section>
-      <section class="panel opera-workbench-card">
-        <div class="panel-head">
-          <div>
-            <span class="eyebrow">Favor Ledger</span>
-            <h2>人情往来</h2>
-          </div>
-          <button class="ghost-button" data-page-jump="favors" type="button">查看台账</button>
-        </div>
-        <div class="opera-balance-strip">
-          <span>收礼 ${formatCurrency(favorStats.received)}</span>
-          <span>送礼 ${formatCurrency(favorStats.given)}</span>
-          <strong>${balanceCopy}</strong>
+        <div class="dashboard-risk-list">
+          ${financeRisks.map((risk) => `<article class="dashboard-risk-item dashboard-risk-item--${escapeHtml(risk.level)}"><strong>${escapeHtml(risk.title)}</strong><span>${escapeHtml(risk.text)}</span></article>`).join("")}
         </div>
       </section>
-      <section class="panel opera-workbench-card">
+      <section class="panel dashboard-panel">
         <div class="panel-head">
           <div>
-            <span class="eyebrow">Recent</span>
-            <h2>最近访问</h2>
+            <span class="eyebrow">ACTION</span>
+            <h2>待处理队列</h2>
           </div>
-          ${ui.searchTerm ? '<button class="ghost-button" id="openSearchPage" type="button">查看搜索结果</button>' : ""}
+          <span class="results-count">${queueItems.length} 项</span>
         </div>
-        <div class="recent-list">${visibleRecentViews.map(recentViewRow).join("") || emptyState("还没有浏览记录")}</div>
+        <div class="dashboard-queue-list">${queueItems.join("")}</div>
+      </section>
+      <section class="panel dashboard-panel">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">TREND</span>
+            <h2>近 6 月收支趋势</h2>
+          </div>
+          <span class="results-count">红收入 / 绿支出</span>
+        </div>
+        ${trendRows.length ? dashboardTrendBars(trendRows) : emptyState("暂无趋势数据")}
+      </section>
+      <section class="panel dashboard-panel">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">REVIEW</span>
+            <h2>复盘摘要</h2>
+          </div>
+          <button class="ghost-button" data-page-jump="favors" type="button">人情台账</button>
+        </div>
+        <div class="dashboard-review-grid">
+          <article><span>人情差额</span><strong>${formatCurrency(Math.abs(favorStats.balance || 0))}</strong><small>${escapeHtml(balanceCopy)}</small></article>
+          <article><span>订阅月均</span><strong>${formatCurrency(subscriptionsOverview.estimatedMonthlyCost)}</strong><small>${subscriptionsOverview.upcoming.length} 项 30 天内到期</small></article>
+          <article><span>事项完成</span><strong>${progress}%</strong><small>${pendingTasks.length} 项未完成</small></article>
+          <article><span>最近导入</span><strong>${latestImport ? `${latestImport.imported || 0} 条` : "暂无"}</strong><small>${latestImport?.mode || "未导入"}</small></article>
+        </div>
       </section>
     </div>
+    <section class="panel dashboard-panel dashboard-recent-panel">
+      <div class="panel-head">
+        <div>
+          <span class="eyebrow">RECENT</span>
+          <h2>最近访问</h2>
+        </div>
+        ${ui.searchTerm ? '<button class="ghost-button" id="openSearchPage" type="button">查看搜索结果</button>' : ""}
+      </div>
+      <div class="recent-list">${visibleRecentViews.slice(0, 6).map(recentViewRow).join("") || emptyState("还没有浏览记录")}</div>
+    </section>
+    <section class="panel dashboard-panel dashboard-task-panel">
+      <div class="panel-head">
+        <div>
+          <span class="eyebrow">TODAY</span>
+          <h2>今日事项</h2>
+        </div>
+        <button class="ghost-button" data-page-jump="tasks" type="button">查看全部</button>
+      </div>
+      <div class="list-stack">${(todayTasks.length ? todayTasks : pendingTasks.slice(0, 4)).map(taskRow).join("") || emptyState("暂无事项")}</div>
+    </section>
   `;
 }
 
@@ -736,50 +835,442 @@ function summarizeBillsByDate(items = []) {
   }, {});
 }
 
-function getScopedBillItems(allBills, month, scope) {
-  if (scope === "year") {
-    const year = String(month || "").slice(0, 4);
-    return (allBills || []).filter((item) => String(item.date || "").startsWith(year));
-  }
-  if (scope === "week") {
-    const now = new Date();
-    const { year, monthIndex } = getMonthDateParts(month);
-    const base =
-      now.getFullYear() === year && now.getMonth() === monthIndex
-        ? new Date(year, monthIndex, now.getDate())
-        : new Date(year, monthIndex, 1);
-    const start = new Date(base);
-    const day = start.getDay() || 7;
-    start.setDate(start.getDate() - day + 1);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 6);
-    return (allBills || []).filter((item) => {
-      const key = String(item.date || "").slice(0, 10);
-      if (!key) return false;
-      const date = new Date(key);
-      return date >= start && date <= end;
-    });
-  }
-  return (allBills || []).filter((item) => String(item.date || "").startsWith(month));
+function getMonthBills(allBills, month) {
+  return (allBills || []).filter((item) => String(item.date || "").startsWith(month) && !item.excludeFromAnalysis);
 }
 
-function billTimelineHealthPanel(allBills, month, scope) {
-  const scopedItems = getScopedBillItems(allBills, month, scope);
-  const income = sumBills(scopedItems.filter(isIncomeBill));
-  const expense = sumBills(scopedItems.filter(isExpenseBill));
+function getMonthlyFinanceSummary(data, month) {
+  const bills = getMonthBills(data.bills || [], month);
+  const incomeItems = bills.filter(isIncomeBill);
+  const expenseItems = bills.filter(isExpenseBill);
+  const income = sumBills(incomeItems);
+  const expense = sumBills(expenseItems);
   const balance = income - expense;
-  const expenseRate = income > 0 ? Math.round((expense / income) * 100) : 0;
-  const score = income <= 0 ? 48 : Math.max(0, Math.min(100, Math.round(100 - Math.max(0, expenseRate - 55) * 1.4 + (balance >= 0 ? 6 : -12))));
-  const tone = score >= 80 ? "健康" : score >= 65 ? "可控" : score >= 50 ? "偏紧" : "预警";
-  const scopeLabel = scope === "year" ? "年度" : scope === "month" ? "月度" : "本周";
+  const fixedExpense = sumBills(expenseItems.filter((item) => getBillFixedType(item)));
+  const repayment = sumBills(expenseItems.filter((item) => ["房贷", "车贷", "信用卡", "银行卡", "花呗", "白条", "购物平台", "其他还款"].some((keyword) => `${item.fixedExpenseType || ""}${item.category || ""}${item.title || ""}`.includes(keyword))));
+  const categoryTotals = Object.entries(
+    expenseItems.reduce((map, item) => {
+      const category = item.category || "未分类";
+      map[category] = (map[category] || 0) + Number(item.amount || 0);
+      return map;
+    }, {}),
+  )
+    .map(([category, amount]) => ({ category, amount }))
+    .sort((left, right) => right.amount - left.amount);
+  const budgets = data.budgets || {};
+  const categoryBudgets = budgets.categoryBudgets || [];
+  return {
+    month,
+    bills,
+    incomeItems,
+    expenseItems,
+    income,
+    expense,
+    balance,
+    fixedExpense,
+    repayment,
+    expenseRate: income > 0 ? expense / income : 0,
+    fixedRate: income > 0 ? fixedExpense / income : 0,
+    repaymentRate: income > 0 ? repayment / income : 0,
+    categoryTotals,
+    totalBudget: Number(budgets.totalBudget || 0),
+    categoryBudgets,
+    futurePlans: budgets.futurePlans || [],
+  };
+}
 
+function getFutureWindow(month, months = 3) {
+  const { year, monthIndex } = getMonthDateParts(month);
+  const start = new Date(year, monthIndex, 1);
+  const end = new Date(year, monthIndex + months, 0);
+  return { startKey: getDateKey(start), endKey: getDateKey(end) };
+}
+
+function getFutureCommitments(data, month) {
+  const { startKey, endKey } = getFutureWindow(month, 3);
+  const planItems = ((data.budgets || {}).futurePlans || [])
+    .filter((item) => item.status !== "取消")
+    .filter((item) => {
+      const key = String(item.date || "").slice(0, 10);
+      return key >= startKey && key <= endKey;
+    })
+    .map((item) => ({ ...item, source: "plan" }));
+  const subscriptionItems = (data.subscriptions || [])
+    .filter((item) => {
+      const key = String(item.nextRenewalDate || "").slice(0, 10);
+      return key >= startKey && key <= endKey;
+    })
+    .map((item) => ({
+      id: `sub-${item.id}`,
+      title: item.name,
+      amount: Number(item.monthlyCost || item.amount || 0),
+      date: item.nextRenewalDate,
+      planType: "订阅续费",
+      priority: item.autoRenew ? "高" : "中",
+      fundingSource: item.paymentMethod || "家庭账户",
+      status: item.autoRenew ? "自动续费" : "待确认",
+      source: "subscription",
+    }));
+  return [...planItems, ...subscriptionItems].sort((left, right) => String(left.date || "").localeCompare(String(right.date || "")));
+}
+
+function buildFinanceRisks(summary, commitments) {
+  const risks = [];
+  if (summary.income <= 0 && summary.expense > 0) risks.push({ level: "risk", title: "缺少收入参照", text: "当前月份已有支出，但未录入工资或其他收入，无法判断支出是否健康。" });
+  if (summary.income > 0 && summary.expenseRate >= 0.9) risks.push({ level: "risk", title: "支出率过高", text: `本月支出已达收入 ${Math.round(summary.expenseRate * 100)}%，建议暂停非必要消费。` });
+  if (summary.income > 0 && summary.repaymentRate >= 0.35) risks.push({ level: "risk", title: "还款压力偏高", text: `还款占收入 ${Math.round(summary.repaymentRate * 100)}%，需要关注信用卡、房贷或分期。` });
+  if (summary.income > 0 && summary.fixedRate >= 0.4) risks.push({ level: "watch", title: "固定支出偏高", text: `固定支出占收入 ${Math.round(summary.fixedRate * 100)}%，下月可支配空间会被压缩。` });
+  if (summary.totalBudget > 0 && summary.expense / summary.totalBudget >= 0.8) risks.push({ level: summary.expense > summary.totalBudget ? "risk" : "watch", title: "预算接近上限", text: `总预算已使用 ${Math.round((summary.expense / summary.totalBudget) * 100)}%。` });
+  const futureExpense = commitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  if (futureExpense > Math.max(summary.balance, 0) + Math.max(summary.income, 0)) risks.push({ level: "watch", title: "未来计划压力", text: `未来 3 个月计划/续费约 ${formatCurrency(futureExpense)}，建议提前安排储备。` });
+  if (!risks.length) risks.push({ level: "good", title: "暂无明显风险", text: "当前数据未触发高风险规则，继续保持收入、支出和预算录入。" });
+  return risks.slice(0, 4);
+}
+
+function billDecisionStrip(summary, commitments) {
+  const futureExpense = commitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const status = summary.income <= 0 ? "待补录" : summary.balance >= futureExpense * 0.5 ? "可控" : summary.balance >= 0 ? "关注" : "风险";
+  const text =
+    summary.income <= 0
+      ? "请先录入当月工资，分析才有收入参照。"
+      : summary.balance < 0
+        ? "本月现金流为负，优先复核大额支出和还款。"
+        : `本月结余 ${formatCurrency(summary.balance)}，未来 3 个月已知计划 ${formatCurrency(futureExpense)}。`;
   return `
-    <aside class="bill-timeline-health bill-timeline-health--${score >= 80 ? "good" : score >= 65 ? "stable" : score >= 50 ? "watch" : "risk"}">
-      <span>${escapeHtml(scopeLabel)}健康趋势</span>
-      <strong>${score}<em>${escapeHtml(tone)}</em></strong>
-      <div class="bill-timeline-health__meter"><i style="width:${score}%"></i></div>
-      <small>收入 ${formatCurrency(income)} · 支出 ${formatCurrency(expense)} · 结余 ${formatCurrency(balance)} · 支出率 ${income > 0 ? `${expenseRate}%` : "缺少收入"}</small>
-    </aside>
+    <section class="bill-decision-strip bill-decision-strip--${status === "风险" ? "risk" : status === "关注" ? "watch" : "stable"}">
+      <span>${escapeHtml(summary.month)} 月度结论</span>
+      <strong>${escapeHtml(status)}</strong>
+      <p>${escapeHtml(text)}</p>
+    </section>
+  `;
+}
+
+function billAnalysisPanel(summary) {
+  const metrics = [
+    ["收入", formatCurrency(summary.income), `${summary.incomeItems.length} 笔`],
+    ["支出", formatCurrency(summary.expense), `${summary.expenseItems.length} 笔`],
+    ["结余", formatCurrency(summary.balance), summary.balance >= 0 ? "现金流为正" : "现金流为负"],
+    ["支出率", summary.income > 0 ? `${Math.round(summary.expenseRate * 100)}%` : "缺少收入", "支出 / 收入"],
+  ];
+  return `
+    <section class="panel bill-decision-panel">
+      <div class="panel-head">
+        <h2>收支分析</h2>
+        <span class="results-count">${escapeHtml(summary.month)}</span>
+      </div>
+      <div class="bill-metric-grid">
+        ${metrics.map(([label, value, hint]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(hint)}</small></article>`).join("")}
+      </div>
+      <div class="bill-category-list">
+        ${(summary.categoryTotals.slice(0, 4).map((row) => {
+          const percent = summary.expense > 0 ? Math.round((row.amount / summary.expense) * 100) : 0;
+          return `<div><span>${escapeHtml(row.category)}</span><i><b style="width:${percent}%"></b></i><strong>${percent}%</strong></div>`;
+        }).join("") || emptyState("暂无支出分类"))}
+      </div>
+    </section>
+  `;
+}
+
+function billRiskPanel(risks) {
+  return `
+    <section class="panel bill-decision-panel">
+      <div class="panel-head">
+        <h2>风险提醒</h2>
+        <span class="results-count">规则判断</span>
+      </div>
+      <div class="bill-risk-list">
+        ${risks.map((risk) => `<article class="bill-risk-item bill-risk-item--${escapeHtml(risk.level)}"><strong>${escapeHtml(risk.title)}</strong><p>${escapeHtml(risk.text)}</p></article>`).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function billBudgetPanel(summary) {
+  const totalUsed = summary.totalBudget > 0 ? Math.round((summary.expense / summary.totalBudget) * 100) : 0;
+  const categoryRows = (summary.categoryBudgets || []).slice(0, 5).map((budget) => {
+    const used = summary.categoryTotals.find((item) => item.category === budget.category)?.amount || 0;
+    const percent = Number(budget.amount || 0) > 0 ? Math.round((used / Number(budget.amount || 0)) * 100) : 0;
+    return { category: budget.category, used, budget: Number(budget.amount || 0), percent };
+  });
+  return `
+    <section class="panel bill-decision-panel">
+      <div class="panel-head">
+        <h2>预算目标</h2>
+        <span class="results-count">${summary.totalBudget ? `${totalUsed}% 已用` : "未设置总预算"}</span>
+      </div>
+      <div class="bill-budget-total">
+        <span>本月总预算</span>
+        <strong>${formatCurrency(summary.expense)} / ${formatCurrency(summary.totalBudget)}</strong>
+        <i><b style="width:${Math.min(totalUsed, 100)}%"></b></i>
+      </div>
+      <div class="bill-budget-list">
+        ${categoryRows.map((row) => `<article><span>${escapeHtml(row.category)}</span><strong>${formatCurrency(row.used)} / ${formatCurrency(row.budget)}</strong><em>${row.percent}%</em></article>`).join("") || emptyState("可在设置预算后查看分类目标")}
+      </div>
+    </section>
+  `;
+}
+
+function billFuturePlanPanel(summary, commitments) {
+  const futureExpense = commitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const nextItems = commitments.slice(0, 5);
+  return `
+    <section class="panel bill-decision-panel">
+      <div class="panel-head">
+        <h2>未来计划</h2>
+        <span class="results-count">未来 3 个月 ${formatCurrency(futureExpense)}</span>
+      </div>
+      <div class="bill-future-list">
+        ${nextItems.map((item) => `
+          <article>
+            <div>
+              <strong>${escapeHtml(item.title || "未命名计划")}</strong>
+              <span>${escapeHtml(item.date || "未设置日期")} · ${escapeHtml(item.planType || "计划")}</span>
+            </div>
+            <em>${formatCurrency(item.amount)}</em>
+            ${item.source === "plan" ? `<button class="ghost-button" data-future-plan-status="${escapeHtml(item.id)}" data-next-status="${item.status === "已准备" ? "计划中" : "已准备"}" type="button">${item.status === "已准备" ? "转计划" : "已准备"}</button><button class="ghost-button danger-button" data-delete-future-plan="${escapeHtml(item.id)}" type="button">删除</button>` : `<span class="tag">订阅</span>`}
+          </article>
+        `).join("") || emptyState("暂无未来计划，建议录入保险、学费、旅行、大件消费等")}
+      </div>
+    </section>
+  `;
+}
+
+function billMonthlyReviewPanel(summary, risks) {
+  const topCategory = summary.categoryTotals[0];
+  const reviewText = summary.balance < 0 ? "现金流为负，优先处理风险提醒。" : summary.income <= 0 ? "缺少收入数据，先补录工资。" : "现金流为正，继续观察预算和未来计划。";
+  return `
+    <section class="panel bill-decision-panel">
+      <div class="panel-head">
+        <h2>月度复盘</h2>
+        <span class="results-count">${escapeHtml(summary.month)}</span>
+      </div>
+      <div class="bill-review-grid">
+        <article><span>复盘判断</span><strong>${escapeHtml(reviewText)}</strong></article>
+        <article><span>最大支出</span><strong>${topCategory ? `${topCategory.category} ${formatCurrency(topCategory.amount)}` : "暂无支出"}</strong></article>
+        <article><span>待处理风险</span><strong>${risks.filter((item) => item.level !== "good").length} 项</strong></article>
+      </div>
+      <button class="ghost-button" data-create-bill-review="${escapeHtml(summary.month)}" type="button">保存为复盘笔记</button>
+    </section>
+  `;
+}
+
+function billLedgerRow(bill, activeMonth) {
+  const isIncome = isIncomeBill(bill);
+  const monthKey = String(bill.date || "").slice(0, 7);
+  const excluded = Boolean(bill.excludeFromAnalysis || bill.analysisExcluded);
+  return `
+    <tr data-bill-ledger-row data-bill-month-key="${escapeHtml(monthKey)}" ${monthKey === activeMonth ? "" : "hidden"}>
+      <td><strong>${escapeHtml(bill.date || "未设置")}</strong></td>
+      <td>
+        <div class="bill-ledger-title">
+          <strong>${escapeHtml(bill.title || "未命名流水")}</strong>
+          <span>${escapeHtml(bill.note || bill.goods || bill.remark || "")}</span>
+          ${excluded ? '<em>不计入分析</em>' : ""}
+        </div>
+      </td>
+      <td>
+        <div class="bill-ledger-category-editor">
+          <input data-bill-category-input="${escapeHtml(bill.id)}" value="${escapeHtml(bill.category || "未分类")}" list="billCategoryOptions" aria-label="分类" />
+          <button class="ghost-button" data-bill-category-save="${escapeHtml(bill.id)}" type="button">保存</button>
+        </div>
+      </td>
+      <td>${escapeHtml(bill.payer || bill.familyMember || "未指定")}</td>
+      <td>${escapeHtml(bill.source || "手动")}</td>
+      <td class="money ${isIncome ? "income" : "expense"}">${isIncome ? "+" : "-"}${formatCurrency(bill.amount)}</td>
+      <td>
+        <div class="bill-ledger-actions">
+          <button class="ghost-button" data-bill-rule-confirm="${escapeHtml(bill.id)}" type="button">记规则</button>
+          <button class="ghost-button" data-bill-analysis-exclude="${escapeHtml(bill.id)}" data-next-excluded="${excluded ? "false" : "true"}" type="button">${excluded ? "计入" : "不计入"}</button>
+          <button class="ghost-button" data-edit="bills:${escapeHtml(bill.id)}" type="button">编辑</button>
+          <button class="ghost-button" data-bill-ledger-detail="${escapeHtml(bill.id)}" type="button">详情</button>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+function billLedgerRuleBoard(classificationRules = [], nonConsumptionRules = []) {
+  const classificationRows = (classificationRules || []).slice(0, 6);
+  const nonConsumptionRows = (nonConsumptionRules || []).slice(0, 6);
+  return `
+    <section class="bill-ledger-rules">
+      <details>
+        <summary>
+          <span>分类规则</span>
+          <em>${classificationRules.length} 条</em>
+        </summary>
+        <form class="bill-ledger-rule-form" id="billClassificationRuleForm">
+          <input name="keyword" placeholder="关键词" autocomplete="off" />
+          <input name="category" placeholder="分类" list="billCategoryOptions" autocomplete="off" />
+          <input name="fixedExpenseType" placeholder="固定类型，可选" autocomplete="off" />
+          <button class="ghost-button" type="submit">新增</button>
+        </form>
+        <div class="bill-ledger-rule-list">
+          ${
+            classificationRows
+              .map(
+                (rule) => `
+                  <article>
+                    <div>
+                      <strong>${escapeHtml(rule.keyword || "未命名规则")}</strong>
+                      <span>${escapeHtml(rule.category || "未分类")} · ${escapeHtml(rule.updatedAt || "")}</span>
+                    </div>
+                    <button class="ghost-button" data-bill-rule-apply="${escapeHtml(rule.id)}" type="button">应用</button>
+                    <button class="ghost-button danger-button" data-bill-rule-delete="${escapeHtml(rule.id)}" type="button">删除</button>
+                  </article>
+                `,
+              )
+              .join("") || emptyState("暂无分类规则")
+          }
+        </div>
+      </details>
+      <details>
+        <summary>
+          <span>不计入规则</span>
+          <em>${nonConsumptionRules.length} 条</em>
+        </summary>
+        <form class="bill-ledger-rule-form bill-ledger-rule-form--compact" id="billNonConsumptionRuleForm">
+          <input name="keyword" placeholder="关键词，例如：亲属卡 / 转账" autocomplete="off" />
+          <input name="note" placeholder="备注，可选" autocomplete="off" />
+          <button class="ghost-button" type="submit">新增</button>
+        </form>
+        <div class="bill-ledger-rule-list">
+          ${
+            nonConsumptionRows
+              .map(
+                (rule) => `
+                  <article>
+                    <div>
+                      <strong>${escapeHtml(rule.keyword || "未命名规则")}</strong>
+                      <span>${escapeHtml(rule.note || "命中后不计入分析")} · ${escapeHtml(rule.updatedAt || "")}</span>
+                    </div>
+                    <button class="ghost-button danger-button" data-bill-non-consumption-rule-delete="${escapeHtml(rule.id)}" type="button">删除</button>
+                  </article>
+                `,
+              )
+              .join("") || emptyState("暂无不计入规则")
+          }
+        </div>
+      </details>
+    </section>
+  `;
+}
+
+function billLedgerModal(allBills, activeMonth, data = {}) {
+  const months = getBillHistoryRows(allBills || []).map((row) => row.month);
+  const normalizedMonths = months.includes(activeMonth) ? months : [activeMonth, ...months].filter(Boolean);
+  const rows = [...(allBills || [])].sort((left, right) => String(right.date || "").localeCompare(String(left.date || "")));
+  const monthCount = rows.filter((bill) => String(bill.date || "").startsWith(activeMonth)).length;
+  const categoryOptions = [...new Set((allBills || []).map((bill) => bill.category).filter(Boolean))]
+    .sort((left, right) => String(left).localeCompare(String(right), "zh-CN"));
+  return `
+    <dialog class="modal bill-ledger-modal" id="billLedgerModal">
+      <section class="modal-panel bill-ledger-modal__panel">
+        <div class="drawer-head">
+          <div>
+            <p class="eyebrow">ORIGINAL LEDGER</p>
+            <h2>完整流水</h2>
+          </div>
+          <button class="icon-button" id="closeBillLedgerModal" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="bill-ledger-tools">
+          <div class="bill-ledger-months" aria-label="月份筛选">
+            ${normalizedMonths
+              .map(
+                (month) => `
+                  <button class="${month === activeMonth ? "is-active" : ""}" data-bill-ledger-month="${escapeHtml(month)}" type="button">
+                    ${escapeHtml(month)}
+                  </button>
+                `,
+              )
+              .join("")}
+          </div>
+          <span class="results-count" data-bill-ledger-count>${escapeHtml(activeMonth)} · ${monthCount} 条</span>
+        </div>
+        ${billLedgerRuleBoard(data.billClassificationRules || [], data.billNonConsumptionRules || [])}
+        <div class="bill-ledger-table-wrap">
+          <datalist id="billCategoryOptions">
+            ${categoryOptions.map((category) => `<option value="${escapeHtml(category)}"></option>`).join("")}
+          </datalist>
+          <table class="bill-ledger-table">
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>流水</th>
+                <th>分类</th>
+                <th>归属</th>
+                <th>来源</th>
+                <th>金额</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((bill) => billLedgerRow(bill, activeMonth)).join("") || `<tr><td colspan="7">${emptyState("暂无流水")}</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </dialog>
+  `;
+}
+
+function futurePlanEntryPanel(month) {
+  const today = new Date().toISOString().slice(0, 10);
+  return `
+    <section class="panel finance-entry-panel future-plan-entry-panel">
+      <div class="panel-head">
+        <h2>未来计划录入</h2>
+        <span class="results-count">收入 / 支出 / 还款</span>
+      </div>
+      <form class="quick-note-form finance-entry-form" id="futurePlanForm">
+        <div class="form-grid">
+          <label>
+            计划类型
+            <select name="planType">
+              <option value="计划支出">计划支出</option>
+              <option value="计划收入">计划收入</option>
+              <option value="固定支出">固定支出</option>
+              <option value="还款">还款</option>
+              <option value="保险">保险</option>
+              <option value="学费">学费</option>
+              <option value="旅行">旅行</option>
+              <option value="大件消费">大件消费</option>
+            </select>
+          </label>
+          <label>
+            金额
+            <input name="amount" type="number" step="0.01" placeholder="0.00" />
+          </label>
+        </div>
+        <label>
+          计划名称
+          <input name="title" placeholder="例如：9 月保险续费" />
+        </label>
+        <div class="form-grid">
+          <label>
+            预计日期
+            <input name="date" type="text" data-date-input value="${escapeHtml(today)}" autocomplete="off" />
+          </label>
+          <label>
+            优先级
+            <select name="priority">
+              <option value="高">高</option>
+              <option value="中">中</option>
+              <option value="低">低</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          资金来源
+          <input name="fundingSource" placeholder="工资 / 储蓄 / 奖金 / 报销" />
+        </label>
+        <label>
+          备注
+          <input name="note" placeholder="记录准备方式或注意事项" />
+        </label>
+        <button class="primary-button" type="submit">保存计划</button>
+      </form>
+    </section>
   `;
 }
 
@@ -799,14 +1290,15 @@ function billTimelineNode(day, summary, active) {
 
 function billTimelinePanel(allBills, activeMonth, scope = "week") {
   const normalizedScope = ["week", "month", "year"].includes(scope) ? scope : "week";
-  const monthItems = (allBills || []).filter((item) => String(item.date || "").startsWith(activeMonth));
+  const analysisBills = (allBills || []).filter((item) => !item.excludeFromAnalysis);
+  const monthItems = analysisBills.filter((item) => String(item.date || "").startsWith(activeMonth));
   const dayMap = summarizeBillsByDate(monthItems);
   const days = getMonthDays(activeMonth);
   const todayKey = getDateKey(new Date());
   const { year } = getMonthDateParts(activeMonth);
   const monthRows = Array.from({ length: 12 }, (_, index) => {
     const key = `${year}-${String(index + 1).padStart(2, "0")}`;
-    const bills = (allBills || []).filter((item) => String(item.date || "").startsWith(key));
+    const bills = analysisBills.filter((item) => String(item.date || "").startsWith(key));
     const income = sumBills(bills.filter(isIncomeBill));
     const expense = sumBills(bills.filter(isExpenseBill));
     return { key, income, expense, balance: income - expense };
@@ -851,11 +1343,13 @@ function billTimelinePanel(allBills, activeMonth, scope = "week") {
             )
             .join("")}
         </div>
-        <button class="ghost-button" data-bill-timeline-today type="button">今天</button>
+        <div class="bill-timeline-actions">
+          <button class="ghost-button" data-open-bill-ledger type="button">完整流水</button>
+          <button class="ghost-button" data-bill-timeline-today type="button">今天</button>
+        </div>
       </div>
       <div class="bill-timeline-panel__body">
         ${body}
-        ${billTimelineHealthPanel(allBills, activeMonth, normalizedScope)}
       </div>
     </section>
   `;
@@ -958,16 +1452,31 @@ function renderBills(elements, data, ui, store) {
   const fallbackMonth = getBillHistoryRows(data.bills || [])[0]?.month || data.budgets?.month || new Date().toISOString().slice(0, 7);
   const month = ui.filters.billMonth || data.budgets?.viewMonth || fallbackMonth;
   const timelineScope = ui.filters.billTimelineScope || "week";
+  const summary = getMonthlyFinanceSummary(data, month);
+  const commitments = getFutureCommitments(data, month);
+  const risks = buildFinanceRisks(summary, commitments);
 
   elements.contentArea.innerHTML = `
     <div class="bill-dashboard-layout">
       <main class="bill-dashboard-layout__main">
         ${billTimelinePanel(data.bills || [], month, timelineScope)}
+        ${billDecisionStrip(summary, commitments)}
+        <div class="bill-decision-grid">
+          ${billAnalysisPanel(summary)}
+          ${billRiskPanel(risks)}
+        </div>
+        <div class="bill-decision-grid">
+          ${billBudgetPanel(summary)}
+          ${billFuturePlanPanel(summary, commitments)}
+        </div>
+        ${billMonthlyReviewPanel(summary, risks)}
       </main>
       <aside class="bill-dashboard-layout__side">
         ${financeEntryPanel(month)}
+        ${futurePlanEntryPanel(month)}
       </aside>
     </div>
+    ${billLedgerModal(data.bills || [], month, data)}
   `;
 }
 
@@ -2495,6 +3004,7 @@ function renderSettings(elements, data, ui, authController) {
       <div class="finance-import-options">
         <input id="financeImportSource" type="hidden" value="自动识别" />
         <input id="financeImportPayer" type="hidden" value="家庭账户" />
+        <input id="financeImportMode" type="hidden" value="raw" />
         <div class="ui-menu-select finance-payer-menu" data-menu-root="finance-source">
           <button class="ui-menu-select__trigger" data-menu-toggle="finance-source" type="button" aria-expanded="false">
             <span>本次导入来源</span>
@@ -2523,6 +3033,16 @@ function renderSettings(elements, data, ui, authController) {
                 `,
               )
               .join("")}
+          </div>
+        </div>
+        <div class="ui-menu-select finance-payer-menu" data-menu-root="finance-import-mode">
+          <button class="ui-menu-select__trigger" data-menu-toggle="finance-import-mode" type="button" aria-expanded="false">
+            <span>导入模式</span>
+            <strong id="financeImportModeLabel">原始账单</strong>
+          </button>
+          <div class="ui-menu-select__panel">
+            <button class="is-active" data-finance-import-mode="raw" type="button">原始账单</button>
+            <button data-finance-import-mode="rules" type="button">规则导入</button>
           </div>
         </div>
         <span>适用于支付宝、微信原始账单；文件内已有“来源”或“承担人”列时优先使用文件值。</span>

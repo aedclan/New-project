@@ -937,6 +937,7 @@ export function createStore() {
         importedAt: createdAt,
         source: String(report.source || "Excel 导入").trim(),
         payer: String(report.payer || "家庭账户").trim(),
+        mode: String(report.mode || "").trim(),
         imported: Number(report.imported || 0),
         skipped: Number(report.skipped || 0),
         existingDuplicates: Number(report.existingDuplicates || 0),
@@ -1220,6 +1221,54 @@ export function createStore() {
         categoryBudgets: parseCategoryBudgets(payload.categoryBudgets),
       };
 
+      save();
+      return true;
+    },
+    saveFuturePlan(payload = {}) {
+      const today = new Date().toISOString().slice(0, 10);
+      const title = String(payload.title || "").trim();
+      const amount = Number(payload.amount || 0);
+      const date = String(payload.date || "").trim();
+      if (!title || !Number.isFinite(amount) || amount <= 0 || !date) return "";
+
+      const plan = {
+        id: createId("fp"),
+        title,
+        amount,
+        date,
+        planType: String(payload.planType || "计划支出").trim(),
+        priority: String(payload.priority || "中").trim(),
+        fundingSource: String(payload.fundingSource || "工资").trim(),
+        status: String(payload.status || "计划中").trim(),
+        note: String(payload.note || "").trim(),
+        createdAt: today,
+        updatedAt: today,
+      };
+
+      data.budgets = {
+        ...(data.budgets || {}),
+        futurePlans: [plan, ...((data.budgets || {}).futurePlans || [])],
+      };
+      save();
+      return plan.id;
+    },
+    updateFuturePlanStatus(planId, status = "已准备") {
+      const plans = (data.budgets || {}).futurePlans || [];
+      const plan = plans.find((item) => item.id === planId);
+      if (!plan) return false;
+      plan.status = String(status || "已准备");
+      plan.updatedAt = new Date().toISOString().slice(0, 10);
+      save();
+      return true;
+    },
+    deleteFuturePlan(planId) {
+      const plans = (data.budgets || {}).futurePlans || [];
+      const nextPlans = plans.filter((item) => item.id !== planId);
+      if (nextPlans.length === plans.length) return false;
+      data.budgets = {
+        ...(data.budgets || {}),
+        futurePlans: nextPlans,
+      };
       save();
       return true;
     },
@@ -1681,8 +1730,9 @@ export function createStore() {
         balance: income - expense,
       };
     },
-    importBills(items) {
+    importBills(items, options = {}) {
       const today = new Date().toISOString().slice(0, 10);
+      const useClassificationRules = options.importMode === "rules";
       const bills = items.map((item) => {
         const base = {
           id: createId("b"),
@@ -1707,7 +1757,17 @@ export function createStore() {
           createdAt: today,
           updatedAt: today,
         };
-        return applyBillClassification(base, data.billClassificationRules);
+        if (useClassificationRules) return applyBillClassification(base, data.billClassificationRules);
+        return {
+          ...base,
+          classification: {
+            category: base.category,
+            confidence: base.category && base.category !== "未分类" ? 80 : 0,
+            source: "raw",
+            reason: "原始账单模式导入，未自动分类",
+            needsReview: !base.category || base.category === "未分类",
+          },
+        };
       });
 
       data.bills.unshift(...bills);

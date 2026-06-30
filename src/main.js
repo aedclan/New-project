@@ -52,18 +52,10 @@ app.autoServerSync = autoServerSync;
 app.realtimeSync = realtimeSync;
 app.store.setChangeHandler(() => autoServerSync.schedule());
 
-function setSyncBanner(message = "") {
-  if (!elements.syncBanner) return;
-  elements.syncBanner.hidden = !message;
-  elements.syncBanner.textContent = message;
-}
-
 window.addEventListener("personalHub:serverLogin", async () => {
-  setSyncBanner("正在读取当前账号的服务器数据...");
   try {
     const result = await pullServerData();
     if (!result.data) {
-      setSyncBanner("");
       return;
     }
     app.store.importData(result.data);
@@ -73,7 +65,6 @@ window.addEventListener("personalHub:serverLogin", async () => {
   } catch (error) {
     window.alert(error.message || "登录成功，但自动读取服务器数据失败。");
   }
-  setSyncBanner("");
 });
 
 window.addEventListener("personalHub:serverLogout", () => {
@@ -94,11 +85,9 @@ runBrowserSubscriptionNotifications(app.store.getSubscriptionsOverview().items);
 
 authController.refreshServerSession({ silent: true }).then(async (isAuthenticated) => {
   if (!isAuthenticated || !authController.isServerAuthenticated) return;
-  setSyncBanner("正在读取当前账号的服务器数据...");
   try {
     const result = await pullServerData();
     if (!result.data) {
-      setSyncBanner("");
       return;
     }
     app.store.importData(result.data);
@@ -108,5 +97,4 @@ authController.refreshServerSession({ silent: true }).then(async (isAuthenticate
   } catch (error) {
     console.warn(error.message || "Failed to restore server data on startup.");
   }
-  setSyncBanner("");
 });

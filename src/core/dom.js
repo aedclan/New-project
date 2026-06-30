@@ -4,7 +4,6 @@ export function getElements() {
     pageTitle: document.querySelector("#pageTitle"),
     pageEyebrow: document.querySelector("#pageEyebrow"),
     filterRow: document.querySelector("#filterRow"),
-    syncBanner: document.querySelector("#syncBanner"),
     navList: document.querySelector("#navList"),
     sideNavList: document.querySelector("#sideNavList"),
     mobileTabs: document.querySelector("#mobileTabs"),

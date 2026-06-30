@@ -122,6 +122,7 @@ export const defaultData = {
       { category: "订阅", amount: 300 },
       { category: "人情往来", amount: 1200 },
     ],
+    futurePlans: [],
     subscriptionMonthlyBudget: 500,
     subscriptionAnnualBudget: 6000,
     subscriptionCategoryBudgets: [
