@@ -985,6 +985,413 @@ function billRiskPanel(risks) {
   `;
 }
 
+function summarizeBillTrendRow(data, rawBills, meta = {}) {
+  const analysisBills = rawBills.filter((item) => !item.excludeFromAnalysis);
+  const income = sumBills(analysisBills.filter(isIncomeBill));
+  const expense = sumBills(analysisBills.filter(isExpenseBill));
+  const rawExpense = sumBills(rawBills.filter(isExpenseBill));
+  const fixedExpense = sumBills(analysisBills.filter((item) => getBillFixedType(item)));
+  const nonFixedExpense = Math.max(expense - fixedExpense, 0);
+  const categories = analysisBills.filter(isExpenseBill).reduce((map, item) => {
+    const category = item.category || "未分类";
+    map[category] = (map[category] || 0) + Number(item.amount || 0);
+    return map;
+  }, {});
+  return {
+    ...meta,
+    income,
+    expense,
+    balance: income - expense,
+    budget: Number(meta.budget || 0),
+    fixedExpense,
+    nonFixedExpense,
+    rawExpense,
+    categories,
+  };
+}
+
+function getBillDayTrendRows(data, activeMonth) {
+  const days = getMonthDays(activeMonth);
+  const monthlyBudget = Number((data.budgets || {}).totalBudget || 0);
+  return days.map((day) => {
+    const rawBills = (data.bills || []).filter((item) => String(item.date || "").slice(0, 10) === day.key);
+    return summarizeBillTrendRow(data, rawBills, {
+      key: day.key,
+      label: String(day.day).padStart(2, "0"),
+      detail: `周${day.weekday}`,
+      month: activeMonth,
+      scope: "day",
+      budget: monthlyBudget ? monthlyBudget / days.length : 0,
+    });
+  });
+}
+
+function getBillWeekTrendRows(data, activeMonth) {
+  const { year, monthIndex } = getMonthDateParts(activeMonth);
+  const days = getMonthDays(activeMonth);
+  const weekCount = Math.ceil(days.length / 7);
+  const monthlyBudget = Number((data.budgets || {}).totalBudget || 0);
+  return Array.from({ length: weekCount }, (_, index) => {
+    const startDay = index * 7 + 1;
+    const endDay = Math.min(startDay + 6, days.length);
+    const startDate = new Date(year, monthIndex, startDay);
+    const endDate = new Date(year, monthIndex, endDay);
+    const startKey = getDateKey(startDate);
+    const endKey = getDateKey(endDate);
+    const rawBills = (data.bills || []).filter((item) => {
+      const key = String(item.date || "").slice(0, 10);
+      return key >= startKey && key <= endKey;
+    });
+    return summarizeBillTrendRow(data, rawBills, {
+      key: `${activeMonth}-w${index + 1}`,
+      label: `W${index + 1}`,
+      detail: `${String(startDay).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`,
+      month: activeMonth,
+      scope: "week",
+      budget: monthlyBudget ? monthlyBudget / weekCount : 0,
+    });
+  });
+}
+
+function getBillMonthTrendRows(data, activeMonth, months = 6) {
+  const { year, monthIndex } = getMonthDateParts(activeMonth);
+  return Array.from({ length: months }, (_, index) => {
+    const date = new Date(year, monthIndex - (months - index - 1), 1);
+    const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const rawBills = (data.bills || []).filter((item) => String(item.date || "").startsWith(month));
+    return summarizeBillTrendRow(data, rawBills, {
+      key: month,
+      label: month.slice(5),
+      detail: month,
+      month,
+      scope: "month",
+      budget: Number((data.budgets || {}).totalBudget || 0),
+    });
+  });
+}
+
+function getBillYearTrendRows(data, activeMonth, years = 5) {
+  const { year } = getMonthDateParts(activeMonth);
+  const yearlyBudget = Number((data.budgets || {}).totalBudget || 0) * 12;
+  return Array.from({ length: years }, (_, index) => {
+    const targetYear = String(year - (years - index - 1));
+    const rawBills = (data.bills || []).filter((item) => String(item.date || "").startsWith(targetYear));
+    return summarizeBillTrendRow(data, rawBills, {
+      key: targetYear,
+      label: targetYear,
+      detail: `${targetYear} 年`,
+      month: `${targetYear}-${String(monthIndexFromActiveYear(activeMonth, targetYear)).padStart(2, "0")}`,
+      scope: "year",
+      budget: yearlyBudget,
+    });
+  });
+}
+
+function monthIndexFromActiveYear(activeMonth, targetYear) {
+  const { year, monthIndex } = getMonthDateParts(activeMonth);
+  return Number(targetYear) === year ? monthIndex + 1 : 12;
+}
+
+function normalizeTrendScope(value) {
+  return ["day", "week", "month", "year"].includes(value) ? value : "month";
+}
+
+function getBillTrendRows(data, activeMonth, scope = "month", range = 6) {
+  const normalizedScope = normalizeTrendScope(scope);
+  if (normalizedScope === "day") return getBillDayTrendRows(data, activeMonth);
+  if (normalizedScope === "week") return getBillWeekTrendRows(data, activeMonth);
+  if (normalizedScope === "year") return getBillYearTrendRows(data, activeMonth, range);
+  return getBillMonthTrendRows(data, activeMonth, range);
+}
+
+function getActiveTrendKey(activeMonth, scope) {
+  const normalizedScope = normalizeTrendScope(scope);
+  if (normalizedScope === "day") {
+    const now = new Date();
+    const todayKey = getDateKey(now);
+    return todayKey.startsWith(activeMonth) ? todayKey : `${activeMonth}-01`;
+  }
+  if (normalizedScope === "week") {
+    const now = new Date();
+    const todayMonth = getDateKey(now).slice(0, 7);
+    const day = todayMonth === activeMonth ? now.getDate() : 1;
+    return `${activeMonth}-w${Math.ceil(day / 7)}`;
+  }
+  if (normalizedScope === "year") return String(getMonthDateParts(activeMonth).year);
+  return activeMonth;
+}
+
+
+function trendValue(row, series) {
+  if (series.category) return Number(row.categories?.[series.category] || 0);
+  return Number(row[series.key] || 0);
+}
+
+function trendPoint(value, index, count, maxValue, minValue, width, height, padding) {
+  const span = Math.max(maxValue - minValue, 1);
+  const divisor = Math.max(count - 1, 1);
+  const x = padding + (index * (width - padding * 2)) / divisor;
+  const y = height - padding - ((value - minValue) / span) * (height - padding * 2);
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
+function buildSmoothTrendPath(points) {
+  if (!points.length) return "";
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  return points
+    .map((point, index) => {
+      if (index === 0) return `M ${point.x} ${point.y}`;
+      const previous = points[index - 1];
+      const controlOffset = Math.max((point.x - previous.x) * 0.42, 8);
+      const c1x = previous.x + controlOffset;
+      const c1y = previous.y;
+      const c2x = point.x - controlOffset;
+      const c2y = point.y;
+      return `C ${Math.round(c1x)} ${Math.round(c1y)}, ${Math.round(c2x)} ${Math.round(c2y)}, ${point.x} ${point.y}`;
+    })
+    .join(" ");
+}
+
+function trendSeriesPoints(rows, series, scale) {
+  return rows.map((row, index) => {
+    const value = trendValue(row, series);
+    return {
+      ...trendPoint(value, index, rows.length, scale.max, scale.min, scale.width, scale.height, scale.padding),
+      value,
+      row,
+      index,
+    };
+  });
+}
+
+function trendCurvePath(rows, series, scale) {
+  const points = trendSeriesPoints(rows, series, scale);
+  const title = `${series.label}：${rows.map((row) => `${row.month} ${formatCurrency(trendValue(row, series))}`).join(" / ")}`;
+  return `<path class="bill-trend-line ${series.className}" d="${buildSmoothTrendPath(points)}"><title>${escapeHtml(title)}</title></path>`;
+}
+
+function trendLabelWidth(text) {
+  return Math.min(112, Math.max(58, String(text).length * 7 + 18));
+}
+
+function trendValueLabel(point, text, className = "", priority = "") {
+  const width = trendLabelWidth(text);
+  const x = Math.max(4, Math.min(point.x - width / 2, 620 - width - 4));
+  const y = Math.max(6, point.y - 30);
+  return `
+    <g class="bill-trend-value-label ${escapeHtml(className)} ${escapeHtml(priority)}" transform="translate(${Math.round(x)} ${Math.round(y)})">
+      <rect width="${width}" height="22" rx="11"></rect>
+      <text x="${Math.round(width / 2)}" y="15">${escapeHtml(text)}</text>
+      <circle cx="${Math.round(point.x - x)}" cy="${Math.round(point.y - y)}" r="3"></circle>
+    </g>
+  `;
+}
+
+function trendSeriesLabels(rows, series, scale, range) {
+  const points = trendSeriesPoints(rows, series, scale);
+  if (!points.length) return "";
+  const candidates = [points[points.length - 1]];
+  const sorted = [...points].sort((left, right) => Math.abs(right.value) - Math.abs(left.value));
+  const peak = sorted[0];
+  if (peak && peak.index !== candidates[0].index && range <= 6 && Math.abs(peak.value) > 0) {
+    candidates.unshift(peak);
+  }
+  const seen = new Set();
+  return candidates
+    .filter((point) => {
+      const key = `${series.label}-${point.index}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((point) => trendValueLabel(point, `${excerptText(series.label, 6)} ${formatCurrency(point.value)}`, series.className, point.index === rows.length - 1 ? "is-final" : "is-peak"))
+    .join("");
+}
+
+function trendProblemMarkers(rows, mode, scale) {
+  const problems = rows
+    .map((row, index) => {
+      if (mode === "budget" && row.budget > 0 && row.expense > row.budget) {
+        return { row, index, value: row.expense, label: `超预算 ${formatCurrency(row.expense - row.budget)}` };
+      }
+      if (mode === "raw" && row.rawExpense > row.expense) {
+        return { row, index, value: row.rawExpense, label: `已剔除 ${formatCurrency(row.rawExpense - row.expense)}` };
+      }
+      if (mode === "cashflow" && row.balance < 0) {
+        return { row, index, value: row.balance, label: `负结余 ${formatCurrency(Math.abs(row.balance))}` };
+      }
+      if (mode === "fixed" && row.expense > 0 && row.fixedExpense / row.expense >= 0.7) {
+        return { row, index, value: row.fixedExpense, label: `固定占比 ${Math.round((row.fixedExpense / row.expense) * 100)}%` };
+      }
+      return null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => Math.abs(right.value) - Math.abs(left.value))
+    .slice(0, 3);
+
+  return problems
+    .map((problem) => {
+      const point = trendPoint(problem.value, problem.index, rows.length, scale.max, scale.min, scale.width, scale.height, scale.padding);
+      return trendValueLabel(point, problem.label, "bill-trend-marker--risk", "is-problem");
+    })
+    .join("");
+}
+
+function trendAxisLabel(row, scope) {
+  if (scope === "day") return row.label;
+  if (scope === "week") return row.detail;
+  if (scope === "year") return row.label;
+  return `${row.label}月`;
+}
+
+function trendAxisLabels(rows, scale, scope, activeTrendKey) {
+  const divisor = Math.max(rows.length - 1, 1);
+  return `
+    <g class="bill-trend-axis-labels">
+      ${rows
+        .map((row, index) => {
+          const x = Math.round(scale.padding + (index * (scale.width - scale.padding * 2)) / divisor);
+          const activeClass = row.key === activeTrendKey ? "is-active" : "";
+          const shouldShowLabel = scope !== "day" || index === 0 || index === rows.length - 1 || row.key === activeTrendKey || Number(row.label) % 5 === 0;
+          return `
+            <g class="${activeClass}" transform="translate(${x} 0)">
+              <line x1="0" y1="183" x2="0" y2="188"></line>
+              ${shouldShowLabel ? `<text x="0" y="202">${escapeHtml(trendAxisLabel(row, scope))}</text>` : ""}
+            </g>
+          `;
+        })
+        .join("")}
+    </g>
+  `;
+}
+
+function trendRangeOptions(scope) {
+  if (scope === "day") return [];
+  if (scope === "week") return [];
+  if (scope === "year") return [3, 5, 10];
+  return [3, 6, 12];
+}
+
+function getTopTrendCategories(rows) {
+  return Object.entries(
+    rows.reduce((map, row) => {
+      Object.entries(row.categories || {}).forEach(([category, amount]) => {
+        map[category] = (map[category] || 0) + Number(amount || 0);
+      });
+      return map;
+    }, {}),
+  )
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 3)
+    .map(([category], index) => ({
+      category,
+      label: category,
+      className: ["bill-trend-line--category-a", "bill-trend-line--category-b", "bill-trend-line--category-c"][index],
+    }));
+}
+
+function normalizeTrendRange(value, scope = "month") {
+  const options = trendRangeOptions(scope);
+  if (!options.length) return 0;
+  const range = Number(value || options[1] || options[0]);
+  return options.includes(range) ? range : options[1] || options[0];
+}
+
+function billTrendPanel(data, activeMonth, mode = "cashflow", range = 6, scope = "month") {
+  const normalizedMode = ["cashflow", "budget", "fixed", "raw", "category"].includes(mode) ? mode : "cashflow";
+  const normalizedScope = normalizeTrendScope(scope);
+  const normalizedRange = normalizeTrendRange(range, normalizedScope);
+  const rows = getBillTrendRows(data, activeMonth, normalizedScope, normalizedRange);
+  const categorySeries = getTopTrendCategories(rows);
+  const categoryFallback = [{ key: "expense", label: "暂无分类，显示总支出", className: "bill-trend-line--expense" }];
+  const seriesByMode = {
+    cashflow: [
+      { key: "income", label: "收入", className: "bill-trend-line--income" },
+      { key: "expense", label: "支出", className: "bill-trend-line--expense" },
+      { key: "balance", label: "结余", className: "bill-trend-line--balance" },
+    ],
+    budget: [
+      { key: "expense", label: "实际支出", className: "bill-trend-line--expense" },
+      { key: "budget", label: "预算", className: "bill-trend-line--budget" },
+    ],
+    fixed: [
+      { key: "fixedExpense", label: "固定支出", className: "bill-trend-line--fixed" },
+      { key: "nonFixedExpense", label: "非固定支出", className: "bill-trend-line--expense" },
+    ],
+    raw: [
+      { key: "rawExpense", label: "原始支出", className: "bill-trend-line--raw" },
+      { key: "expense", label: "过滤后支出", className: "bill-trend-line--expense" },
+    ],
+    category: categorySeries.length ? categorySeries : categoryFallback,
+  };
+  const series = seriesByMode[normalizedMode];
+  const values = rows.flatMap((row) => series.map((item) => trendValue(row, item)));
+  const minValue = normalizedMode === "cashflow" ? Math.min(0, ...values) : 0;
+  const maxValue = Math.max(1, ...values);
+  const scale = { min: minValue, max: maxValue, width: 620, height: 210, padding: 24 };
+  const scopeLabel = { day: `${activeMonth} · 按日`, week: `${activeMonth} · 按周`, month: `近 ${normalizedRange} 月`, year: `近 ${normalizedRange} 年` }[normalizedScope];
+  const rangeOptions = trendRangeOptions(normalizedScope);
+  const activeTrendKey = getActiveTrendKey(activeMonth, normalizedScope);
+  return `
+    <section class="panel bill-trend-panel">
+      <div class="panel-head">
+        <div>
+          <h2>收支趋势</h2>
+          <span class="results-count">${escapeHtml(scopeLabel)} · 图内显示时间坐标</span>
+        </div>
+        <div class="bill-trend-control-group">
+          <div class="bill-trend-tabs bill-trend-tabs--scope">
+            ${[
+              ["day", "日"],
+              ["week", "周"],
+              ["month", "月"],
+              ["year", "年"],
+            ]
+              .map((item) => `<button class="${normalizedScope === item[0] ? "is-active" : ""}" data-bill-trend-scope="${item[0]}" type="button">${item[1]}</button>`)
+              .join("")}
+          </div>
+          <div class="bill-trend-tabs">
+            ${[
+              ["cashflow", "收入支出"],
+              ["budget", "预算对比"],
+              ["fixed", "固定支出"],
+              ["raw", "原始对比"],
+              ["category", "分类对比"],
+            ]
+              .map((item) => `<button class="${normalizedMode === item[0] ? "is-active" : ""}" data-bill-trend-mode="${item[0]}" type="button">${item[1]}</button>`)
+              .join("")}
+          </div>
+          ${
+            rangeOptions.length
+              ? `<div class="bill-trend-tabs bill-trend-tabs--range">
+                  ${rangeOptions.map((item) => `<button class="${normalizedRange === item ? "is-active" : ""}" data-bill-trend-range="${item}" type="button">${item}${normalizedScope === "year" ? "年" : "月"}</button>`).join("")}
+                </div>`
+              : ""
+          }
+        </div>
+      </div>
+      <div class="bill-trend-chart">
+        <svg viewBox="0 0 ${scale.width} ${scale.height}" role="img" aria-label="收支趋势折线图">
+          <g class="bill-trend-grid">
+            <line x1="24" y1="24" x2="24" y2="186"></line>
+            <line x1="24" y1="186" x2="596" y2="186"></line>
+            <line x1="24" y1="105" x2="596" y2="105"></line>
+          </g>
+          ${series.map((item) => trendCurvePath(rows, item, scale)).join("")}
+          <g class="bill-trend-label-layer">
+            ${series.map((item) => trendSeriesLabels(rows, item, scale, normalizedRange)).join("")}
+            ${trendProblemMarkers(rows, normalizedMode, scale)}
+          </g>
+          ${trendAxisLabels(rows, scale, normalizedScope, activeTrendKey)}
+        </svg>
+      </div>
+      <div class="bill-trend-legend">
+        ${series.map((item) => `<span class="${escapeHtml(item.className)}"><i></i>${escapeHtml(item.label)}</span>`).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function billBudgetPanel(summary) {
   const totalUsed = summary.totalBudget > 0 ? Math.round((summary.expense / summary.totalBudget) * 100) : 0;
   const categoryRows = (summary.categoryBudgets || []).slice(0, 5).map((budget) => {
@@ -1012,21 +1419,52 @@ function billBudgetPanel(summary) {
 
 function billFuturePlanPanel(summary, commitments) {
   const futureExpense = commitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  const nextItems = commitments.slice(0, 5);
+  const reserve = Math.max(summary.balance, 0);
+  const today = new Date();
+  const controlRows = commitments
+    .map((item) => {
+      const amount = Number(item.amount || 0);
+      const dueDate = String(item.date || "").slice(0, 10);
+      const dueTime = dueDate ? new Date(`${dueDate}T00:00:00`) : null;
+      const dueDays = dueTime ? Math.ceil((dueTime - today) / 86400000) : 999;
+      const gap = Math.max(amount - reserve, 0);
+      const pressure = reserve > 0 ? amount / reserve : amount > 0 ? 99 : 0;
+      const isRisk = gap > 0 || item.priority === "高" || (dueDays <= 30 && pressure >= 0.35);
+      const isWatch = !isRisk && (dueDays <= 60 || pressure >= 0.2 || item.priority === "中");
+      const level = isRisk ? "risk" : isWatch ? "watch" : "good";
+      const action = gap > 0
+        ? `缺口 ${formatCurrency(gap)}，建议拆分准备或推迟。`
+        : dueDays <= 30
+          ? "临近发生，建议锁定资金来源。"
+          : "可控，按计划跟踪即可。";
+      return { ...item, amount, dueDate, dueDays, gap, level, action };
+    })
+    .sort((left, right) => {
+      const levelWeight = { risk: 0, watch: 1, good: 2 };
+      return levelWeight[left.level] - levelWeight[right.level] || left.dueDays - right.dueDays || right.amount - left.amount;
+    })
+    .slice(0, 5);
+  const riskCount = controlRows.filter((item) => item.level === "risk").length;
   return `
     <section class="panel bill-decision-panel">
       <div class="panel-head">
         <h2>未来计划</h2>
-        <span class="results-count">未来 3 个月 ${formatCurrency(futureExpense)}</span>
+        <span class="results-count">${riskCount ? `${riskCount} 项高风险` : "风险可控"} · 未来 3 个月 ${formatCurrency(futureExpense)}</span>
+      </div>
+      <div class="bill-future-control-summary">
+        <article><span>可用结余</span><strong>${formatCurrency(reserve)}</strong></article>
+        <article><span>计划压力</span><strong>${formatCurrency(futureExpense)}</strong></article>
+        <article><span>控制目标</span><strong>${futureExpense > reserve ? "先补缺口" : "按期准备"}</strong></article>
       </div>
       <div class="bill-future-list">
-        ${nextItems.map((item) => `
-          <article>
+        ${controlRows.map((item) => `
+          <article class="bill-future-item bill-future-item--${escapeHtml(item.level)}">
             <div>
               <strong>${escapeHtml(item.title || "未命名计划")}</strong>
-              <span>${escapeHtml(item.date || "未设置日期")} · ${escapeHtml(item.planType || "计划")}</span>
+              <span>${escapeHtml(item.dueDate || "未设置日期")} · ${escapeHtml(item.planType || "计划")} · ${item.dueDays < 999 ? `${Math.max(item.dueDays, 0)} 天内` : "未排期"}</span>
             </div>
             <em>${formatCurrency(item.amount)}</em>
+            <p>${escapeHtml(item.action)}</p>
             ${item.source === "plan" ? `<button class="ghost-button" data-future-plan-status="${escapeHtml(item.id)}" data-next-status="${item.status === "已准备" ? "计划中" : "已准备"}" type="button">${item.status === "已准备" ? "转计划" : "已准备"}</button><button class="ghost-button danger-button" data-delete-future-plan="${escapeHtml(item.id)}" type="button">删除</button>` : `<span class="tag">订阅</span>`}
           </article>
         `).join("") || emptyState("暂无未来计划，建议录入保险、学费、旅行、大件消费等")}
@@ -1277,9 +1715,8 @@ function futurePlanEntryPanel(month) {
 function billTimelineNode(day, summary, active) {
   const hasFlow = summary.income > 0 || summary.expense > 0;
   return `
-    <button class="bill-time-node ${active ? "is-active" : ""} ${hasFlow ? "has-flow" : ""}" type="button" tabindex="-1">
-      <span>${escapeHtml(String(day.day).padStart(2, "0"))}</span>
-      <b>周${escapeHtml(day.weekday)}</b>
+    <button class="bill-time-node ${active ? "is-active" : ""} ${hasFlow ? "has-flow" : ""}" data-bill-timeline-day="${escapeHtml(day.key)}" type="button">
+      <span><strong>${escapeHtml(String(day.day).padStart(2, "0"))}</strong><b>周${escapeHtml(day.weekday)}</b></span>
       <small>
         <em class="bill-time-income">+${formatCurrency(summary.income)}</em>
         <em class="bill-time-expense">-${formatCurrency(summary.expense)}</em>
@@ -1311,7 +1748,7 @@ function billTimelinePanel(allBills, activeMonth, scope = "week") {
             .map(
               (row) => `
                 <button class="bill-month-node ${row.key === activeMonth ? "is-active" : ""}" data-bill-timeline-month="${escapeHtml(row.key)}" type="button">
-                  <span>${escapeHtml(row.key.slice(5))}月</span>
+                  <span><strong>${escapeHtml(row.key.slice(5))}月</strong><b>${escapeHtml(String(year))}</b></span>
                   <strong>${formatCurrency(row.balance)}</strong>
                   <small><em class="bill-time-income">+${formatCurrency(row.income)}</em><em class="bill-time-expense">-${formatCurrency(row.expense)}</em></small>
                 </button>
@@ -1452,6 +1889,9 @@ function renderBills(elements, data, ui, store) {
   const fallbackMonth = getBillHistoryRows(data.bills || [])[0]?.month || data.budgets?.month || new Date().toISOString().slice(0, 7);
   const month = ui.filters.billMonth || data.budgets?.viewMonth || fallbackMonth;
   const timelineScope = ui.filters.billTimelineScope || "week";
+  const trendMode = ui.filters.billTrendMode || "cashflow";
+  const trendScope = ui.filters.billTrendScope || "month";
+  const trendRange = ui.filters.billTrendRange || 6;
   const summary = getMonthlyFinanceSummary(data, month);
   const commitments = getFutureCommitments(data, month);
   const risks = buildFinanceRisks(summary, commitments);
@@ -1460,6 +1900,7 @@ function renderBills(elements, data, ui, store) {
     <div class="bill-dashboard-layout">
       <main class="bill-dashboard-layout__main">
         ${billTimelinePanel(data.bills || [], month, timelineScope)}
+        ${billTrendPanel(data, month, trendMode, trendRange, trendScope)}
         ${billDecisionStrip(summary, commitments)}
         <div class="bill-decision-grid">
           ${billAnalysisPanel(summary)}

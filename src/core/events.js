@@ -904,7 +904,20 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const billTimelineScopeButton = event.target.closest("[data-bill-timeline-scope]");
     if (billTimelineScopeButton) {
-      app.ui.filters.billTimelineScope = billTimelineScopeButton.dataset.billTimelineScope;
+      const nextScope = billTimelineScopeButton.dataset.billTimelineScope || "week";
+      app.ui.filters.billTimelineScope = nextScope;
+      app.ui.filters.billTrendScope = nextScope === "month" ? "day" : nextScope === "year" ? "month" : "week";
+      app.ui.filters.billTrendRange = nextScope === "year" ? 12 : 6;
+      persistUiState(app.ui);
+      renderer.render();
+      return;
+    }
+
+    const billTimelineDayButton = event.target.closest("[data-bill-timeline-day]");
+    if (billTimelineDayButton) {
+      app.ui.filters.billMonth = String(billTimelineDayButton.dataset.billTimelineDay || "").slice(0, 7) || app.ui.filters.billMonth;
+      app.ui.filters.billTimelineScope = "month";
+      app.ui.filters.billTrendScope = "day";
       persistUiState(app.ui);
       renderer.render();
       return;
@@ -914,6 +927,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     if (billTimelineMonthButton) {
       app.ui.filters.billMonth = billTimelineMonthButton.dataset.billTimelineMonth;
       app.ui.filters.billTimelineScope = "month";
+      app.ui.filters.billTrendScope = "day";
       persistUiState(app.ui);
       renderer.render();
       return;
@@ -923,10 +937,49 @@ export function bindEvents(app, elements, renderer, formController, authControll
     if (billTimelineTodayButton) {
       app.ui.filters.billMonth = new Date().toISOString().slice(0, 7);
       app.ui.filters.billTimelineScope = "week";
+      app.ui.filters.billTrendScope = "day";
       persistUiState(app.ui);
       renderer.render();
       requestAnimationFrame(() => {
         document.querySelector(".bill-time-node.is-active")?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+      });
+      return;
+    }
+
+    const billTrendModeButton = event.target.closest("[data-bill-trend-mode]");
+    if (billTrendModeButton) {
+      app.ui.filters.billTrendMode = billTrendModeButton.dataset.billTrendMode || "cashflow";
+      persistUiState(app.ui);
+      renderer.render();
+      return;
+    }
+
+    const billTrendScopeButton = event.target.closest("[data-bill-trend-scope]");
+    if (billTrendScopeButton) {
+      const nextScope = billTrendScopeButton.dataset.billTrendScope || "month";
+      app.ui.filters.billTrendScope = nextScope;
+      app.ui.filters.billTrendRange = nextScope === "year" ? 5 : 6;
+      persistUiState(app.ui);
+      renderer.render();
+      return;
+    }
+
+    const billTrendRangeButton = event.target.closest("[data-bill-trend-range]");
+    if (billTrendRangeButton) {
+      app.ui.filters.billTrendRange = Number(billTrendRangeButton.dataset.billTrendRange || 6);
+      persistUiState(app.ui);
+      renderer.render();
+      return;
+    }
+
+    const billTrendMonthButton = event.target.closest("[data-bill-trend-month]");
+    if (billTrendMonthButton) {
+      app.ui.filters.billMonth = billTrendMonthButton.dataset.billTrendMonth;
+      app.ui.filters.billTimelineScope = "month";
+      persistUiState(app.ui);
+      renderer.render();
+      requestAnimationFrame(() => {
+        document.querySelector("#billLedgerModal")?.showModal();
       });
       return;
     }
