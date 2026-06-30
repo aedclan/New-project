@@ -952,6 +952,14 @@ function billAnalysisPanel(summary) {
     ["结余", formatCurrency(summary.balance), summary.balance >= 0 ? "现金流为正" : "现金流为负"],
     ["支出率", summary.income > 0 ? `${Math.round(summary.expenseRate * 100)}%` : "缺少收入", "支出 / 收入"],
   ];
+  const flowRows = summary.categoryTotals.slice(0, 6).map((row) => {
+    const items = summary.expenseItems.filter((item) => (item.category || "未分类") === row.category);
+    const percent = summary.expense > 0 ? Math.round((row.amount / summary.expense) * 100) : 0;
+    const sample = items
+      .slice()
+      .sort((left, right) => Number(right.amount || 0) - Number(left.amount || 0))[0];
+    return { ...row, count: items.length, percent, sampleTitle: sample?.title || sample?.note || sample?.source || "暂无代表流水" };
+  });
   return `
     <section class="panel bill-decision-panel">
       <div class="panel-head">
@@ -966,6 +974,23 @@ function billAnalysisPanel(summary) {
           const percent = summary.expense > 0 ? Math.round((row.amount / summary.expense) * 100) : 0;
           return `<div><span>${escapeHtml(row.category)}</span><i><b style="width:${percent}%"></b></i><strong>${percent}%</strong></div>`;
         }).join("") || emptyState("暂无支出分类"))}
+      </div>
+      <div class="bill-flow-list">
+        ${flowRows
+          .map(
+            (row) => `
+              <article>
+                <div>
+                  <strong>${escapeHtml(row.category)}</strong>
+                  <span>${escapeHtml(row.sampleTitle)} · ${row.count} 笔</span>
+                </div>
+                <i><b style="width:${row.percent}%"></b></i>
+                <em>${formatCurrency(row.amount)}</em>
+                <small>${row.percent}%</small>
+              </article>
+            `,
+          )
+          .join("") || emptyState("本月暂无支出流向")}
       </div>
     </section>
   `;
@@ -1166,50 +1191,38 @@ function trendSeriesPoints(rows, series, scale) {
 
 function trendCurvePath(rows, series, scale) {
   const points = trendSeriesPoints(rows, series, scale);
-  const title = `${series.label}：${rows.map((row) => `${row.month} ${formatCurrency(trendValue(row, series))}`).join(" / ")}`;
-  return `<path class="bill-trend-line ${series.className}" d="${buildSmoothTrendPath(points)}"><title>${escapeHtml(title)}</title></path>`;
-}
-
-function trendLabelWidth(text) {
-  return Math.min(112, Math.max(58, String(text).length * 7 + 18));
-}
-
-function trendValueLabel(point, text, className = "", priority = "") {
-  const width = trendLabelWidth(text);
-  const x = Math.max(4, Math.min(point.x - width / 2, 620 - width - 4));
-  const y = Math.max(6, point.y - 30);
+  const d = buildSmoothTrendPath(points);
+  const currentPoint = points[points.length - 1];
+  const currentLabel = currentPoint ? `${series.label} · ${trendAxisLabel(currentPoint.row, currentPoint.row.scope)} · ${formatCurrency(currentPoint.value)}` : series.label;
   return `
-    <g class="bill-trend-value-label ${escapeHtml(className)} ${escapeHtml(priority)}" transform="translate(${Math.round(x)} ${Math.round(y)})">
-      <rect width="${width}" height="22" rx="11"></rect>
-      <text x="${Math.round(width / 2)}" y="15">${escapeHtml(text)}</text>
-      <circle cx="${Math.round(point.x - x)}" cy="${Math.round(point.y - y)}" r="3"></circle>
-    </g>
+    <path class="bill-trend-line ${series.className}" d="${d}"></path>
+    <path class="bill-trend-line-hit ${series.className}" d="${d}" data-bill-trend-tooltip="${escapeHtml(currentLabel)}"></path>
   `;
 }
 
-function trendSeriesLabels(rows, series, scale, range) {
-  const points = trendSeriesPoints(rows, series, scale);
-  if (!points.length) return "";
-  const candidates = [points[points.length - 1]];
-  const sorted = [...points].sort((left, right) => Math.abs(right.value) - Math.abs(left.value));
-  const peak = sorted[0];
-  if (peak && peak.index !== candidates[0].index && range <= 6 && Math.abs(peak.value) > 0) {
-    candidates.unshift(peak);
-  }
-  const seen = new Set();
-  return candidates
-    .filter((point) => {
-      const key = `${series.label}-${point.index}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
+function trendPointMarkers(rows, series, scale) {
+  return trendSeriesPoints(rows, series, scale)
+    .map((point) => {
+      const period = trendAxisLabel(point.row, point.row.scope);
+      const value = formatCurrency(point.value);
+      return `
+        <g class="bill-trend-point ${series.className}">
+          <circle class="bill-trend-point__dot" cx="${point.x}" cy="${point.y}" r="2.4"></circle>
+          <circle
+            class="bill-trend-point__hit"
+            cx="${point.x}"
+            cy="${point.y}"
+            r="10"
+            data-bill-trend-tooltip="${escapeHtml(`${series.label} · ${period} · ${value}`)}"
+          ></circle>
+        </g>
+      `;
     })
-    .map((point) => trendValueLabel(point, `${excerptText(series.label, 6)} ${formatCurrency(point.value)}`, series.className, point.index === rows.length - 1 ? "is-final" : "is-peak"))
     .join("");
 }
 
 function trendProblemMarkers(rows, mode, scale) {
-  const problems = rows
+  return rows
     .map((row, index) => {
       if (mode === "budget" && row.budget > 0 && row.expense > row.budget) {
         return { row, index, value: row.expense, label: `超预算 ${formatCurrency(row.expense - row.budget)}` };
@@ -1227,12 +1240,18 @@ function trendProblemMarkers(rows, mode, scale) {
     })
     .filter(Boolean)
     .sort((left, right) => Math.abs(right.value) - Math.abs(left.value))
-    .slice(0, 3);
-
-  return problems
+    .slice(0, 2)
     .map((problem) => {
       const point = trendPoint(problem.value, problem.index, rows.length, scale.max, scale.min, scale.width, scale.height, scale.padding);
-      return trendValueLabel(point, problem.label, "bill-trend-marker--risk", "is-problem");
+      return `
+        <circle
+          class="bill-trend-problem-hit"
+          cx="${point.x}"
+          cy="${point.y}"
+          r="11"
+          data-bill-trend-tooltip="${escapeHtml(`${problem.label} · ${trendAxisLabel(problem.row, problem.row.scope)}`)}"
+        ></circle>
+      `;
     })
     .join("");
 }
@@ -1378,8 +1397,8 @@ function billTrendPanel(data, activeMonth, mode = "cashflow", range = 6, scope =
             <line x1="24" y1="105" x2="596" y2="105"></line>
           </g>
           ${series.map((item) => trendCurvePath(rows, item, scale)).join("")}
-          <g class="bill-trend-label-layer">
-            ${series.map((item) => trendSeriesLabels(rows, item, scale, normalizedRange)).join("")}
+          <g class="bill-trend-point-layer">
+            ${series.map((item) => trendPointMarkers(rows, item, scale)).join("")}
             ${trendProblemMarkers(rows, normalizedMode, scale)}
           </g>
           ${trendAxisLabels(rows, scale, normalizedScope, activeTrendKey)}
@@ -1429,6 +1448,13 @@ function billFuturePlanPanel(summary, commitments) {
       const dueDays = dueTime ? Math.ceil((dueTime - today) / 86400000) : 999;
       const gap = Math.max(amount - reserve, 0);
       const pressure = reserve > 0 ? amount / reserve : amount > 0 ? 99 : 0;
+      const reasons = [];
+      if (gap > 0) reasons.push(`资金缺口 ${formatCurrency(gap)}`);
+      if (item.priority === "高") reasons.push("高优先级");
+      if (item.priority === "中") reasons.push("中优先级");
+      if (dueDays <= 30) reasons.push("30 天内");
+      else if (dueDays <= 60) reasons.push("60 天内");
+      if (pressure >= 0.35 && reserve > 0) reasons.push(`占结余 ${Math.round(pressure * 100)}%`);
       const isRisk = gap > 0 || item.priority === "高" || (dueDays <= 30 && pressure >= 0.35);
       const isWatch = !isRisk && (dueDays <= 60 || pressure >= 0.2 || item.priority === "中");
       const level = isRisk ? "risk" : isWatch ? "watch" : "good";
@@ -1437,7 +1463,7 @@ function billFuturePlanPanel(summary, commitments) {
         : dueDays <= 30
           ? "临近发生，建议锁定资金来源。"
           : "可控，按计划跟踪即可。";
-      return { ...item, amount, dueDate, dueDays, gap, level, action };
+      return { ...item, amount, dueDate, dueDays, gap, level, action, reasons: reasons.length ? reasons : ["未触发风险规则"] };
     })
     .sort((left, right) => {
       const levelWeight = { risk: 0, watch: 1, good: 2 };
@@ -1462,6 +1488,9 @@ function billFuturePlanPanel(summary, commitments) {
             <div>
               <strong>${escapeHtml(item.title || "未命名计划")}</strong>
               <span>${escapeHtml(item.dueDate || "未设置日期")} · ${escapeHtml(item.planType || "计划")} · ${item.dueDays < 999 ? `${Math.max(item.dueDays, 0)} 天内` : "未排期"}</span>
+              <div class="bill-future-reasons">
+                ${item.reasons.map((reason) => `<small>${escapeHtml(reason)}</small>`).join("")}
+              </div>
             </div>
             <em>${formatCurrency(item.amount)}</em>
             <p>${escapeHtml(item.action)}</p>
@@ -1494,6 +1523,8 @@ function billMonthlyReviewPanel(summary, risks) {
 
 function billLedgerRow(bill, activeMonth) {
   const isIncome = isIncomeBill(bill);
+  const isPendingType = bill.type === "待确认";
+  const needsCategoryReview = !isPendingType && bill.classification?.needsReview;
   const monthKey = String(bill.date || "").slice(0, 7);
   const excluded = Boolean(bill.excludeFromAnalysis || bill.analysisExcluded);
   return `
@@ -1503,7 +1534,7 @@ function billLedgerRow(bill, activeMonth) {
         <div class="bill-ledger-title">
           <strong>${escapeHtml(bill.title || "未命名流水")}</strong>
           <span>${escapeHtml(bill.note || bill.goods || bill.remark || "")}</span>
-          ${excluded ? '<em>不计入分析</em>' : ""}
+          ${isPendingType ? '<em>待确认类型</em>' : needsCategoryReview ? '<em>待分类</em>' : excluded ? '<em>不计入分析</em>' : ""}
         </div>
       </td>
       <td>
@@ -1514,83 +1545,15 @@ function billLedgerRow(bill, activeMonth) {
       </td>
       <td>${escapeHtml(bill.payer || bill.familyMember || "未指定")}</td>
       <td>${escapeHtml(bill.source || "手动")}</td>
-      <td class="money ${isIncome ? "income" : "expense"}">${isIncome ? "+" : "-"}${formatCurrency(bill.amount)}</td>
+      <td class="money ${isPendingType ? "pending" : isIncome ? "income" : "expense"}">${isPendingType ? "" : isIncome ? "+" : "-"}${formatCurrency(bill.amount)}</td>
       <td>
         <div class="bill-ledger-actions">
-          <button class="ghost-button" data-bill-rule-confirm="${escapeHtml(bill.id)}" type="button">记规则</button>
           <button class="ghost-button" data-bill-analysis-exclude="${escapeHtml(bill.id)}" data-next-excluded="${excluded ? "false" : "true"}" type="button">${excluded ? "计入" : "不计入"}</button>
           <button class="ghost-button" data-edit="bills:${escapeHtml(bill.id)}" type="button">编辑</button>
           <button class="ghost-button" data-bill-ledger-detail="${escapeHtml(bill.id)}" type="button">详情</button>
         </div>
       </td>
     </tr>
-  `;
-}
-
-function billLedgerRuleBoard(classificationRules = [], nonConsumptionRules = []) {
-  const classificationRows = (classificationRules || []).slice(0, 6);
-  const nonConsumptionRows = (nonConsumptionRules || []).slice(0, 6);
-  return `
-    <section class="bill-ledger-rules">
-      <details>
-        <summary>
-          <span>分类规则</span>
-          <em>${classificationRules.length} 条</em>
-        </summary>
-        <form class="bill-ledger-rule-form" id="billClassificationRuleForm">
-          <input name="keyword" placeholder="关键词" autocomplete="off" />
-          <input name="category" placeholder="分类" list="billCategoryOptions" autocomplete="off" />
-          <input name="fixedExpenseType" placeholder="固定类型，可选" autocomplete="off" />
-          <button class="ghost-button" type="submit">新增</button>
-        </form>
-        <div class="bill-ledger-rule-list">
-          ${
-            classificationRows
-              .map(
-                (rule) => `
-                  <article>
-                    <div>
-                      <strong>${escapeHtml(rule.keyword || "未命名规则")}</strong>
-                      <span>${escapeHtml(rule.category || "未分类")} · ${escapeHtml(rule.updatedAt || "")}</span>
-                    </div>
-                    <button class="ghost-button" data-bill-rule-apply="${escapeHtml(rule.id)}" type="button">应用</button>
-                    <button class="ghost-button danger-button" data-bill-rule-delete="${escapeHtml(rule.id)}" type="button">删除</button>
-                  </article>
-                `,
-              )
-              .join("") || emptyState("暂无分类规则")
-          }
-        </div>
-      </details>
-      <details>
-        <summary>
-          <span>不计入规则</span>
-          <em>${nonConsumptionRules.length} 条</em>
-        </summary>
-        <form class="bill-ledger-rule-form bill-ledger-rule-form--compact" id="billNonConsumptionRuleForm">
-          <input name="keyword" placeholder="关键词，例如：亲属卡 / 转账" autocomplete="off" />
-          <input name="note" placeholder="备注，可选" autocomplete="off" />
-          <button class="ghost-button" type="submit">新增</button>
-        </form>
-        <div class="bill-ledger-rule-list">
-          ${
-            nonConsumptionRows
-              .map(
-                (rule) => `
-                  <article>
-                    <div>
-                      <strong>${escapeHtml(rule.keyword || "未命名规则")}</strong>
-                      <span>${escapeHtml(rule.note || "命中后不计入分析")} · ${escapeHtml(rule.updatedAt || "")}</span>
-                    </div>
-                    <button class="ghost-button danger-button" data-bill-non-consumption-rule-delete="${escapeHtml(rule.id)}" type="button">删除</button>
-                  </article>
-                `,
-              )
-              .join("") || emptyState("暂无不计入规则")
-          }
-        </div>
-      </details>
-    </section>
   `;
 }
 
@@ -1625,7 +1588,6 @@ function billLedgerModal(allBills, activeMonth, data = {}) {
           </div>
           <span class="results-count" data-bill-ledger-count>${escapeHtml(activeMonth)} · ${monthCount} 条</span>
         </div>
-        ${billLedgerRuleBoard(data.billClassificationRules || [], data.billNonConsumptionRules || [])}
         <div class="bill-ledger-table-wrap">
           <datalist id="billCategoryOptions">
             ${categoryOptions.map((category) => `<option value="${escapeHtml(category)}"></option>`).join("")}
@@ -3441,7 +3403,7 @@ function renderSettings(elements, data, ui, authController) {
         <h2>财务数据管理</h2>
         <span class="results-count">微信 / 支付宝 / Excel / CSV</span>
       </div>
-      <p class="panel-copy">用于整站财务数据迁移。导入时会自动识别微信、支付宝、生活收支、人情往来、关系人和订阅项目，CSV 会自动处理常见中文编码，并在写入前提示重复账单。</p>
+      <p class="panel-copy">用于整站财务数据迁移。默认采用手动确认模式，以文件内填写的收入 / 支出为准，不套用系统预设关键词规则；CSV 会自动处理常见中文编码，并在写入前提示重复账单。</p>
       <div class="finance-import-options">
         <input id="financeImportSource" type="hidden" value="自动识别" />
         <input id="financeImportPayer" type="hidden" value="家庭账户" />
@@ -3476,17 +3438,7 @@ function renderSettings(elements, data, ui, authController) {
               .join("")}
           </div>
         </div>
-        <div class="ui-menu-select finance-payer-menu" data-menu-root="finance-import-mode">
-          <button class="ui-menu-select__trigger" data-menu-toggle="finance-import-mode" type="button" aria-expanded="false">
-            <span>导入模式</span>
-            <strong id="financeImportModeLabel">原始账单</strong>
-          </button>
-          <div class="ui-menu-select__panel">
-            <button class="is-active" data-finance-import-mode="raw" type="button">原始账单</button>
-            <button data-finance-import-mode="rules" type="button">规则导入</button>
-          </div>
-        </div>
-        <span>适用于支付宝、微信原始账单；文件内已有“来源”或“承担人”列时优先使用文件值。</span>
+        <span>按文件类型列导入收入 / 支出，不使用历史规则或预设关键词；文件未写类型的流水才标记为待确认。</span>
       </div>
       <div class="settings-action-row">
         <button class="ghost-button" id="downloadBillExcelTemplate" type="button">下载模板</button>

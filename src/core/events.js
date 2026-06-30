@@ -248,6 +248,38 @@ export function bindEvents(app, elements, renderer, formController, authControll
     renderer.closeDrawer();
   }
 
+  const billTrendTooltip = document.createElement("div");
+  billTrendTooltip.className = "bill-trend-tooltip";
+  billTrendTooltip.hidden = true;
+  document.body.appendChild(billTrendTooltip);
+
+  function hideBillTrendTooltip() {
+    billTrendTooltip.hidden = true;
+    billTrendTooltip.classList.remove("is-visible");
+  }
+
+  function moveBillTrendTooltip(event) {
+    const target = event.target.closest?.("[data-bill-trend-tooltip]");
+    if (!target) {
+      hideBillTrendTooltip();
+      return;
+    }
+    const parts = String(target.dataset.billTrendTooltip || "").split(" · ");
+    const title = parts[0] || "趋势";
+    const meta = parts.slice(1).join(" · ");
+    billTrendTooltip.innerHTML = `<strong>${escapeHtml(title)}</strong>${meta ? `<span>${escapeHtml(meta)}</span>` : ""}`;
+    billTrendTooltip.hidden = false;
+    billTrendTooltip.classList.add("is-visible");
+
+    const margin = 14;
+    const width = billTrendTooltip.offsetWidth || 180;
+    const height = billTrendTooltip.offsetHeight || 50;
+    const x = Math.min(Math.max(event.clientX, width / 2 + margin), window.innerWidth - width / 2 - margin);
+    const y = Math.min(Math.max(event.clientY, height + margin), window.innerHeight - margin);
+    billTrendTooltip.style.left = `${Math.round(x)}px`;
+    billTrendTooltip.style.top = `${Math.round(y)}px`;
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replaceAll("&", "&amp;")
@@ -256,6 +288,9 @@ export function bindEvents(app, elements, renderer, formController, authControll
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
   }
+
+  document.addEventListener("pointermove", moveBillTrendTooltip);
+  document.addEventListener("pointerleave", hideBillTrendTooltip);
 
   function renderPreviewList(items = []) {
     if (!items.length) return `<span class="merge-preview-empty">无</span>`;
@@ -1035,21 +1070,6 @@ export function bindEvents(app, elements, renderer, formController, authControll
       return;
     }
 
-    const billRuleConfirmButton = event.target.closest("[data-bill-rule-confirm]");
-    if (billRuleConfirmButton) {
-      if (!(await ensureAuth())) return;
-      const id = billRuleConfirmButton.dataset.billRuleConfirm;
-      const input = document.querySelector(`[data-bill-category-input="${CSS.escape(id)}"]`);
-      if (input?.value) app.store.updateBillCategory(id, input.value);
-      const ok = app.store.confirmBillClassification(id);
-      if (!ok) {
-        window.alert("规则保存失败，请确认流水仍然存在。");
-        return;
-      }
-      reopenBillLedger();
-      return;
-    }
-
     const billAnalysisExcludeButton = event.target.closest("[data-bill-analysis-exclude]");
     if (billAnalysisExcludeButton) {
       if (!(await ensureAuth())) return;
@@ -1057,41 +1077,9 @@ export function bindEvents(app, elements, renderer, formController, authControll
       const nextExcluded = billAnalysisExcludeButton.dataset.nextExcluded === "true";
       const ok = app.store.setBillAnalysisExcluded(id, nextExcluded);
       if (!ok) {
-        window.alert("规则保存失败，请确认流水仍然存在。");
+        window.alert("保存失败，请确认流水仍然存在。");
         return;
       }
-      if (nextExcluded) app.store.createNonConsumptionRuleFromBill(id);
-      reopenBillLedger();
-      return;
-    }
-
-    const billRuleApplyButton = event.target.closest("[data-bill-rule-apply]");
-    if (billRuleApplyButton) {
-      if (!(await ensureAuth())) return;
-      const result = app.store.applyBillClassificationRule(billRuleApplyButton.dataset.billRuleApply);
-      window.alert(`已匹配 ${result.matched || 0} 条流水，更新 ${result.applied || 0} 条分类。`);
-      reopenBillLedger();
-      return;
-    }
-
-    const billRuleDeleteButton = event.target.closest("[data-bill-rule-delete]");
-    if (billRuleDeleteButton) {
-      if (!(await ensureAuth())) return;
-      const confirmed = window.confirm("确定删除这条分类规则吗？已修改过的历史流水不会被自动还原。");
-      if (!confirmed) return;
-      const ok = app.store.deleteBillClassificationRule(billRuleDeleteButton.dataset.billRuleDelete);
-      if (!ok) window.alert("删除分类规则失败。");
-      reopenBillLedger();
-      return;
-    }
-
-    const billNonConsumptionRuleDeleteButton = event.target.closest("[data-bill-non-consumption-rule-delete]");
-    if (billNonConsumptionRuleDeleteButton) {
-      if (!(await ensureAuth())) return;
-      const confirmed = window.confirm("确定删除这条不计入规则吗？删除后会重新计算流水是否计入分析。");
-      if (!confirmed) return;
-      const ok = app.store.deleteBillNonConsumptionRule(billNonConsumptionRuleDeleteButton.dataset.billNonConsumptionRuleDelete);
-      if (!ok) window.alert("删除不计入规则失败。");
       reopenBillLedger();
       return;
     }
@@ -1161,20 +1149,6 @@ export function bindEvents(app, elements, renderer, formController, authControll
       if (label) label.textContent = source;
       document.querySelectorAll("[data-finance-source]").forEach((button) => button.classList.toggle("is-active", button === financeSourceButton));
       const menuRoot = financeSourceButton.closest("[data-menu-root]");
-      menuRoot?.classList.remove("is-open");
-      menuRoot?.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
-      return;
-    }
-
-    const financeImportModeButton = event.target.closest("[data-finance-import-mode]");
-    if (financeImportModeButton) {
-      const mode = financeImportModeButton.dataset.financeImportMode || "raw";
-      const input = document.querySelector("#financeImportMode");
-      const label = document.querySelector("#financeImportModeLabel");
-      if (input) input.value = mode;
-      if (label) label.textContent = mode === "rules" ? "规则导入" : "原始账单";
-      document.querySelectorAll("[data-finance-import-mode]").forEach((button) => button.classList.toggle("is-active", button === financeImportModeButton));
-      const menuRoot = financeImportModeButton.closest("[data-menu-root]");
       menuRoot?.classList.remove("is-open");
       menuRoot?.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
       return;
@@ -1688,45 +1662,6 @@ export function bindEvents(app, elements, renderer, formController, authControll
   });
 
   document.addEventListener("submit", async (event) => {
-    if (event.target.id === "billClassificationRuleForm") {
-      event.preventDefault();
-      if (!(await ensureAuth())) return;
-      const formData = new FormData(event.target);
-      const ok = app.store.addBillClassificationRule({
-        keyword: formData.get("keyword"),
-        category: formData.get("category"),
-        fixedExpenseType: formData.get("fixedExpenseType"),
-      });
-      if (!ok) {
-        window.alert("新增分类规则失败，请填写关键词和有效分类。");
-        return;
-      }
-      renderer.render();
-      requestAnimationFrame(() => {
-        document.querySelector("#billLedgerModal")?.showModal();
-      });
-      return;
-    }
-
-    if (event.target.id === "billNonConsumptionRuleForm") {
-      event.preventDefault();
-      if (!(await ensureAuth())) return;
-      const formData = new FormData(event.target);
-      const ok = app.store.addBillNonConsumptionRule({
-        keyword: formData.get("keyword"),
-        note: formData.get("note"),
-      });
-      if (!ok) {
-        window.alert("新增不计入规则失败，请填写关键词。");
-        return;
-      }
-      renderer.render();
-      requestAnimationFrame(() => {
-        document.querySelector("#billLedgerModal")?.showModal();
-      });
-      return;
-    }
-
     if (event.target.id !== "bookmarkForm") return;
     event.preventDefault();
     if (!(await ensureAuth())) return;

@@ -152,46 +152,40 @@ function parseAmount(value) {
   return match ? Number(match[0]) : Number(normalized);
 }
 
-function inferBillCategory(title, description = "") {
-  const text = `${title || ""} ${description || ""}`;
-  const rules = [
-    ["房贷", "住房"],
-    ["房租", "住房"],
-    ["物业", "住房"],
-    ["水费", "水电燃气"],
-    ["电费", "水电燃气"],
-    ["燃气", "水电燃气"],
-    ["餐饮", "餐饮"],
-    ["美团", "餐饮"],
-    ["饿了么", "餐饮"],
-    ["滴滴", "交通"],
-    ["地铁", "交通"],
-    ["公交", "交通"],
-    ["加油", "交通"],
-    ["医院", "医疗"],
-    ["药", "医疗"],
-    ["学费", "教育"],
-    ["幼儿园", "教育"],
-    ["学校", "教育"],
-    ["淘宝", "购物"],
-    ["京东", "购物"],
-    ["拼多多", "购物"],
-    ["订阅", "订阅"],
-    ["会员", "订阅"],
-  ];
-  return rules.find(([keyword]) => text.includes(keyword))?.[1] || "未分类";
-}
-
 function normalizeDirection(value) {
   const text = String(value || "").trim().toLowerCase();
   if (["收礼", "收到", "收入", "received"].includes(text)) return "received";
   return "given";
 }
 
-function normalizeBillType(value) {
-  const text = String(value || "").trim();
-  if (["收入", "收", "+", "入账", "退款", "转入"].includes(text) || text.includes("退款")) return "收入";
-  return "支出";
+function normalizeBillTypeFromFile(value) {
+  const text = String(value || "").replace(/\s+/g, "").trim().toLowerCase();
+  if (!text) return "";
+  if (["收入", "收", "+", "入账", "in", "income"].includes(text)) return "收入";
+  if (["支出", "支", "-", "出账", "out", "expense"].includes(text)) return "支出";
+  return "";
+}
+
+function readBillTypeValue(row) {
+  return readRowValue(row, ["收支类型", "收/支", "收支", "资金流向", "类型", "type", "Type"]) || "";
+}
+
+function inferBillTypeFromAmountColumns(incomeAmountValue, expenseAmountValue) {
+  const incomeAmount = parseAmount(incomeAmountValue);
+  const expenseAmount = parseAmount(expenseAmountValue);
+  const hasIncomeAmount = String(incomeAmountValue || "").trim() && Number.isFinite(incomeAmount) && incomeAmount > 0;
+  const hasExpenseAmount = String(expenseAmountValue || "").trim() && Number.isFinite(expenseAmount) && expenseAmount > 0;
+  if (hasIncomeAmount && !hasExpenseAmount) return "收入";
+  if (hasExpenseAmount && !hasIncomeAmount) return "支出";
+  return "";
+}
+
+function inferBillTypeFromSignedAmount(value) {
+  const text = String(value || "").replace(/\s+/g, "").trim();
+  if (!text) return "";
+  if (text.startsWith("+") || text.includes("收入")) return "收入";
+  if (text.startsWith("-") || text.includes("支出")) return "支出";
+  return "";
 }
 
 function shouldSkipBillRow(rawType, status, title, description) {
@@ -299,8 +293,6 @@ function parseBillRows(rows, xlsx, sheetName = "", options = {}) {
   const valid = [];
   const errors = [];
   const selectedSource = options.defaultSource && options.defaultSource !== "自动识别" ? options.defaultSource : "";
-  const useRuleMode = options.importMode === "rules";
-
   rows.forEach((row, index) => {
     const rowNumber = index + 2;
     const detectedSource = detectPaymentSource(row, sheetName);
@@ -308,11 +300,15 @@ function parseBillRows(rows, xlsx, sheetName = "", options = {}) {
     const counterparty = readFirstText(row, ["交易对方", "收/付款方式", "商户名称", "对方账户", "对方", "商家名称", "交易来源地", "名称"]);
     const goods = readFirstText(row, ["商品", "商品名称", "商品说明", "交易商品", "商品详情", "交易说明", "说明", "标题", "备注", "title", "Title"]);
     const title = buildBillTitle(counterparty, goods, readFirstText(row, ["标题", "名称", "title", "Title"]));
-    const rawType = readRowValue(row, ["类型", "交易类型", "收支类型", "收/支", "收支", "资金流向", "type", "Type"]) || "支出";
-    const type = normalizeBillType(rawType);
-    const amount = parseAmount(readRowValue(row, ["金额", "金额(元)", "金额（元）", "交易金额", "人民币金额", "支出金额", "收入金额", "amount", "Amount"]));
-    const fileCategory = readRowValue(row, ["分类", "交易分类", "账单分类", "类型", "category", "Category"]);
-    const category = String(fileCategory || (useRuleMode ? (type === "收入" && String(rawType).includes("退款") ? "退款" : inferBillCategory(title, goods)) : "未分类")).trim();
+    const rawType = readBillTypeValue(row);
+    const incomeAmountValue = readRowValue(row, ["收入金额", "收入", "收款金额", "incomeAmount", "Income Amount"]);
+    const expenseAmountValue = readRowValue(row, ["支出金额", "支出", "付款金额", "expenseAmount", "Expense Amount"]);
+    const amountValue = readRowValue(row, ["金额", "金额(元)", "金额（元）", "交易金额", "人民币金额", "amount", "Amount"]);
+    const amount = Math.abs(parseAmount(amountValue || incomeAmountValue || expenseAmountValue));
+    const fileType = normalizeBillTypeFromFile(rawType) || inferBillTypeFromAmountColumns(incomeAmountValue, expenseAmountValue) || inferBillTypeFromSignedAmount(amountValue);
+    const type = fileType || "待确认";
+    const fileCategory = readRowValue(row, ["分类", "交易分类", "账单分类", "category", "Category"]);
+    const category = String(fileCategory || "未分类").trim();
     const source = String(readRowValue(row, ["来源", "账单来源", "source", "Source"]) || selectedSource || detectedSource || "Excel 导入").trim();
     const payer = String(readRowValue(row, ["承担人", "付款人", "payer", "Payer"]) || options.defaultPayer || "家庭账户").trim();
     const familyMember = String(readRowValue(row, ["家庭成员", "孩子", "familyMember", "Family Member"]) || "").trim();
@@ -350,7 +346,9 @@ function parseBillRows(rows, xlsx, sheetName = "", options = {}) {
       projectId,
       sourceTransactionId: transactionId,
       paymentMethod,
-      tags: [...new Set([...tags, source].filter(Boolean))],
+      tags: [...new Set([...tags, source, type === "待确认" && "待确认"].filter(Boolean))],
+      analysisExcluded: type === "待确认",
+      excludeFromAnalysis: type === "待确认",
     });
   });
 
@@ -595,9 +593,8 @@ function summarizeImportOptions(options = {}) {
 
 function summarizeBillClassificationReport(report = {}) {
   return [
-    `- 自动分类：${report.autoCategorized || 0} 条`,
-    `- 记忆规则命中：${report.memoryMatched || 0} 条`,
-    `- 待确认分类：${report.needsReview || 0} 条`,
+    "- 导入规则：已关闭，完全以文件字段为准",
+    `- 待确认类型 / 分类：${report.needsReview || 0} 条`,
     `- 未分类：${report.uncategorized || 0} 条`,
   ];
 }
@@ -822,7 +819,7 @@ export function createBillExcelController(app, renderer) {
           "准备导入财务数据：",
           `本次导入来源：${options.defaultSource || "自动识别"}`,
           `本次导入归属：${options.defaultPayer || "家庭账户"}`,
-          `导入模式：${options.importMode === "rules" ? "规则导入" : "原始账单"}`,
+          "导入模式：按文件类型导入",
           `生活收支 ${grouped.bills.length} 条`,
           billImport.duplicates.length ? `重复账单将跳过 ${billImport.duplicates.length} 条` : "未发现重复账单",
           `关系人 ${grouped.contacts.length} 条`,
@@ -874,7 +871,7 @@ export function createBillExcelController(app, renderer) {
       app.store.saveBillImportReport?.({
         source: options.defaultSource || "自动识别",
         payer: options.defaultPayer || "家庭账户",
-        mode: options.importMode === "rules" ? "规则导入" : "原始账单",
+        mode: "按文件类型导入",
         imported: importedBillReport?.count ?? grouped.bills.length,
         skipped: billImport.duplicates.length,
         existingDuplicates: billImport.existingDuplicates.length,

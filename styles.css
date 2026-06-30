@@ -2742,6 +2742,10 @@ h2 {
   color: #138a52;
 }
 
+.money.pending {
+  color: var(--muted);
+}
+
 .account-version-badge {
   position: absolute;
   right: 12px;
@@ -6398,7 +6402,7 @@ h1 {
 
 .bill-trend-line {
   fill: none;
-  stroke-width: 3;
+  stroke-width: 2.3;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -6450,41 +6454,84 @@ h1 {
   color: #ea580c;
 }
 
-.bill-trend-label-layer {
+.bill-trend-line-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 16;
+  cursor: crosshair;
+  pointer-events: stroke;
+}
+
+.bill-trend-point-layer {
+  pointer-events: auto;
+}
+
+.bill-trend-point {
+  color: inherit;
+}
+
+.bill-trend-point__dot {
+  fill: currentColor;
+  opacity: 0.72;
   pointer-events: none;
-}
-
-.bill-trend-value-label {
-  color: var(--text);
-}
-
-.bill-trend-value-label rect {
-  fill: color-mix(in srgb, var(--surface) 92%, #fff);
-  stroke: color-mix(in srgb, currentColor 24%, var(--line));
-  stroke-width: 1;
-  filter: drop-shadow(0 8px 14px rgba(15, 23, 42, 0.1));
-}
-
-.bill-trend-value-label text {
-  fill: currentColor;
-  font-size: 10px;
-  font-weight: 700;
-  text-anchor: middle;
-}
-
-.bill-trend-value-label circle {
-  fill: currentColor;
   stroke: var(--surface);
+  stroke-width: 1.2;
+}
+
+.bill-trend-point__hit,
+.bill-trend-problem-hit {
+  fill: transparent;
+  cursor: crosshair;
+  pointer-events: all;
+  stroke: transparent;
+}
+
+.bill-trend-problem-hit {
+  stroke: var(--danger);
   stroke-width: 2;
+  stroke-dasharray: 3 4;
 }
 
-.bill-trend-marker--risk {
-  color: var(--danger);
+.bill-trend-tooltip {
+  position: fixed;
+  z-index: 80;
+  max-width: 220px;
+  transform: translate(-50%, calc(-100% - 14px));
+  border: 1px solid color-mix(in srgb, var(--success) 22%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 94%, #fff);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.14);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0;
+  padding: 8px 10px;
+  pointer-events: none;
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease;
 }
 
-.bill-trend-value-label.is-problem rect {
-  fill: color-mix(in srgb, var(--danger) 10%, var(--surface));
-  stroke: color-mix(in srgb, var(--danger) 42%, var(--line));
+.bill-trend-tooltip.is-visible {
+  opacity: 1;
+  transform: translate(-50%, calc(-100% - 18px));
+}
+
+.bill-trend-tooltip strong {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.bill-trend-tooltip span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 520;
+  margin-top: 2px;
 }
 
 .bill-trend-axis-labels {
@@ -6499,13 +6546,13 @@ h1 {
 .bill-trend-axis-labels text {
   fill: var(--muted);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   text-anchor: middle;
 }
 
 .bill-trend-axis-labels .is-active text {
   fill: var(--success);
-  font-weight: 800;
+  font-weight: 680;
 }
 
 .bill-trend-axis-labels .is-active line {
@@ -6519,7 +6566,7 @@ h1 {
   gap: 8px 12px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 600;
 }
 
 .bill-trend-legend span {
@@ -6589,7 +6636,8 @@ h1 {
 .bill-category-list,
 .bill-risk-list,
 .bill-budget-list,
-.bill-future-list {
+.bill-future-list,
+.bill-flow-list {
   display: grid;
   gap: 8px;
 }
@@ -6617,6 +6665,63 @@ h1 {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #0c754f, #2da56a);
+}
+
+.bill-flow-list article {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 90%, var(--bg));
+  padding: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(90px, 0.7fr) auto 42px;
+  gap: 8px;
+  align-items: center;
+}
+
+.bill-flow-list strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-flow-list span {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-flow-list i {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.bill-flow-list b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0c754f, #2da56a);
+}
+
+.bill-flow-list em,
+.bill-flow-list small {
+  color: var(--text);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.bill-flow-list small {
+  color: var(--muted);
 }
 
 .bill-risk-item {
@@ -6760,6 +6865,33 @@ h1 {
   font-weight: 750;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.bill-future-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.bill-future-reasons small {
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 88%, #fff);
+  color: var(--muted);
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.bill-future-item--risk .bill-future-reasons small {
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--line));
+  color: var(--danger);
+}
+
+.bill-future-item--watch .bill-future-reasons small {
+  border-color: color-mix(in srgb, var(--warning) 34%, var(--line));
+  color: var(--warning);
 }
 
 .bill-future-list button {
@@ -7067,6 +7199,14 @@ h1 {
   .bill-future-list article {
     grid-template-columns: 1fr;
     align-items: stretch;
+  }
+
+  .bill-flow-list article {
+    grid-template-columns: 1fr auto;
+  }
+
+  .bill-flow-list i {
+    grid-column: 1 / -1;
   }
 
   .bill-future-list p {

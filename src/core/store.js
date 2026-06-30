@@ -1,6 +1,5 @@
 ﻿import { RECENT_VIEWS_KEY, STORAGE_KEY } from "../config/constants.js";
 import { defaultData } from "../data/default-data.js";
-import { applyBillClassification, createBillClassificationRule, isUncategorizedCategory } from "./bill-classifier.js";
 import { clone, excerptText } from "./utils.js";
 
 let idCounter = 0;
@@ -44,28 +43,6 @@ function inferFixedExpenseType(bill) {
 function inferRepaymentType(bill) {
   const text = `${bill.fixedExpenseType || ""} ${bill.category || ""} ${bill.title || ""} ${bill.description || ""} ${(bill.tags || []).join(" ")}`;
   return ["房贷", "车贷", "信用卡", "银行卡", "花呗", "白条", "购物平台分期", "消费分期", "借款"].find((keyword) => text.includes(keyword)) || "";
-}
-
-function inferNonConsumptionBill(bill) {
-  const text = `${bill.title || ""} ${bill.description || ""} ${bill.category || ""} ${bill.paymentMethod || ""} ${(bill.tags || []).join(" ")}`;
-  const normalized = text.replace(/\s+/g, "");
-  const keywords = ["亲属卡", "亲情卡", "代付", "代收", "代转", "内部转账", "账户互转", "转账", "转款", "收款后转出", "转给别人", "转给他人", "还给别人", "帮付", "垫付"];
-  return keywords.some((keyword) => normalized.includes(keyword));
-}
-
-function billMatchesNonConsumptionRule(bill = {}, rule = {}) {
-  const keyword = String(rule.keyword || "").replace(/\s+/g, "").trim();
-  if (!keyword) return false;
-  const fields = rule.fields || ["title", "description", "category", "paymentMethod", "tags"];
-  const text = fields
-    .map((field) => (field === "tags" ? (bill.tags || []).join(" ") : bill[field] || ""))
-    .join(" ")
-    .replace(/\s+/g, "");
-  return text.includes(keyword);
-}
-
-function inferNonConsumptionBillWithRules(bill, rules = []) {
-  return (rules || []).some((rule) => billMatchesNonConsumptionRule(bill, rule));
 }
 
 function isBillExcludedFromAnalysis(bill) {
@@ -128,7 +105,7 @@ function buildMonthlyFinanceActions({ income, expense, expenseItems, health }) {
   return [
     !income && expense ? `- 补录工资收入：当前有支出 ${expenseItems.length} 笔，但缺少收入参照。` : "",
     uncategorized.length ? `- 处理未分类账单：${uncategorized.length} 笔，影响支出结构判断。` : "",
-    reviewItems.length ? `- 确认自动分类：${reviewItems.length} 笔低置信度账单需要复核。` : "",
+    reviewItems.length ? `- 复核导入流水：${reviewItems.length} 笔账单需要确认类型或分类。` : "",
     largeItems.length ? `- 复核大额支出：${largeItems.length} 笔，最大 ¥${Math.max(...largeItems.map((item) => Number(item.amount || 0))).toFixed(2)}。` : "",
     repaymentRate >= 30 ? `- 检查还款压力：还款占收入 ${repaymentRate}%。` : "",
     fixedRate >= 45 ? `- 压缩固定成本：固定支出占收入 ${fixedRate}%。` : "",
@@ -168,10 +145,10 @@ function normalizeLegacyData(data) {
   delete data.portfolio;
   delete data.relationshipGroups;
   data.bookmarks = data.bookmarks || [];
-  data.billClassificationRules = data.billClassificationRules || [];
-  data.billNonConsumptionRules = data.billNonConsumptionRules || [];
+  data.billClassificationRules = [];
+  data.billNonConsumptionRules = [];
   data.billImportReports = data.billImportReports || [];
-  data.bills = (data.bills || []).map((bill) => applyBillClassification(bill, data.billClassificationRules));
+  data.bills = data.bills || [];
 
   const contactIdMap = new Map();
   const uniqueContacts = [];
@@ -227,8 +204,8 @@ function normalizeLegacyData(data) {
     bill.source = bill.source || "手动";
     bill.payer = bill.payer || "家庭账户";
     bill.familyMember = bill.familyMember || "";
-    bill.fixedExpenseType = bill.fixedExpenseType || inferFixedExpenseType(bill);
-    bill.excludeFromAnalysis = Boolean(bill.analysisExcluded || inferNonConsumptionBillWithRules(bill, data.billNonConsumptionRules));
+    bill.fixedExpenseType = bill.fixedExpenseType || "";
+    bill.excludeFromAnalysis = Boolean(bill.analysisExcluded || bill.excludeFromAnalysis);
     if (bill.excludeFromAnalysis) {
       bill.category = bill.category && bill.category !== "未分类" ? bill.category : "非消费流水";
       bill.tags = [...new Set([...(bill.tags || []), "不计入分析"])];
@@ -649,39 +626,6 @@ export function createStore() {
     };
   }
 
-  function rememberBillClassification(entry, existing = null) {
-    if (!entry || entry.type !== "支出") return;
-    const category = String(entry.category || "").trim();
-    if (isUncategorizedCategory(category)) return;
-    const previousCategory = String(existing?.category || "").trim();
-    const wasChanged = !existing || previousCategory !== category || existing.classification?.needsReview;
-    if (!wasChanged) return;
-
-    const rule = createBillClassificationRule(entry);
-    if (!rule) return;
-    data.billClassificationRules = data.billClassificationRules || [];
-    const index = data.billClassificationRules.findIndex((item) => item.keyword === rule.keyword);
-    if (index >= 0) {
-      data.billClassificationRules[index] = { ...data.billClassificationRules[index], ...rule };
-    } else {
-      data.billClassificationRules.unshift(rule);
-    }
-    data.billClassificationRules = data.billClassificationRules.slice(0, 300);
-  }
-
-  function refreshNonConsumptionFlags() {
-    data.billNonConsumptionRules = data.billNonConsumptionRules || [];
-    data.bills = (data.bills || []).map((bill) => {
-      const excluded = Boolean(bill.analysisExcluded || inferNonConsumptionBillWithRules(bill, data.billNonConsumptionRules));
-      return {
-        ...bill,
-        excludeFromAnalysis: excluded,
-        category: excluded && (!bill.category || bill.category === "未分类") ? "非消费流水" : bill.category,
-        tags: excluded ? [...new Set([...(bill.tags || []), "不计入分析"])] : (bill.tags || []).filter((tag) => tag !== "不计入分析"),
-      };
-    });
-  }
-
   return {
     getData() {
       return data;
@@ -737,7 +681,10 @@ export function createStore() {
         reason: bill.classification?.reason || "用户确认分类",
         needsReview: false,
       };
-      rememberBillClassification(bill, null);
+      if (bill.type === "待确认") bill.type = "支出";
+      bill.analysisExcluded = false;
+      bill.excludeFromAnalysis = false;
+      bill.tags = (bill.tags || []).filter((tag) => !["待确认", "不计入分析"].includes(tag));
       bill.updatedAt = new Date().toISOString().slice(0, 10);
       save();
       return true;
@@ -757,70 +704,11 @@ export function createStore() {
         needsReview: false,
         autoCategory: false,
       };
-      bill.tags = [...new Set([...(bill.tags || []), "手动分类"])];
+      if (bill.type === "待确认") bill.type = "支出";
+      bill.analysisExcluded = false;
+      bill.excludeFromAnalysis = false;
+      bill.tags = [...new Set([...(bill.tags || []).filter((tag) => !["待确认", "不计入分析"].includes(tag)), "手动分类"])];
       bill.updatedAt = new Date().toISOString().slice(0, 10);
-      rememberBillClassification(bill, previous);
-      save();
-      return true;
-    },
-    addBillClassificationRule(payload = {}) {
-      const keyword = String(payload.keyword || "").replace(/\s+/g, "").trim().toLowerCase();
-      const category = String(payload.category || "").trim();
-      if (!keyword || isUncategorizedCategory(category)) return false;
-      data.billClassificationRules = data.billClassificationRules || [];
-      const rule = {
-        id: `rule-${keyword}`,
-        keyword,
-        category,
-        fixedExpenseType: String(payload.fixedExpenseType || "").trim(),
-        confidence: 99,
-        updatedAt: new Date().toISOString().slice(0, 10),
-      };
-      const index = data.billClassificationRules.findIndex((item) => item.keyword === keyword);
-      if (index >= 0) {
-        data.billClassificationRules[index] = { ...data.billClassificationRules[index], ...rule };
-      } else {
-        data.billClassificationRules.unshift(rule);
-      }
-      data.billClassificationRules = data.billClassificationRules.slice(0, 300);
-      data.bills = (data.bills || []).map((bill) => applyBillClassification(bill, data.billClassificationRules));
-      save();
-      return true;
-    },
-    deleteBillClassificationRule(ruleId) {
-      const before = (data.billClassificationRules || []).length;
-      data.billClassificationRules = (data.billClassificationRules || []).filter((item) => item.id !== ruleId);
-      if (data.billClassificationRules.length === before) return false;
-      save();
-      return true;
-    },
-    addBillNonConsumptionRule(payload = {}) {
-      const keyword = String(payload.keyword || "").replace(/\s+/g, "").trim();
-      if (!keyword) return false;
-      const rule = {
-        id: `non-consumption-${keyword.toLowerCase()}`,
-        keyword,
-        note: String(payload.note || "").trim(),
-        fields: ["title", "description", "category", "paymentMethod", "tags"],
-        updatedAt: new Date().toISOString().slice(0, 10),
-      };
-      data.billNonConsumptionRules = data.billNonConsumptionRules || [];
-      const index = data.billNonConsumptionRules.findIndex((item) => item.keyword === keyword);
-      if (index >= 0) {
-        data.billNonConsumptionRules[index] = { ...data.billNonConsumptionRules[index], ...rule };
-      } else {
-        data.billNonConsumptionRules.unshift(rule);
-      }
-      data.billNonConsumptionRules = data.billNonConsumptionRules.slice(0, 200);
-      refreshNonConsumptionFlags();
-      save();
-      return true;
-    },
-    deleteBillNonConsumptionRule(ruleId) {
-      const before = (data.billNonConsumptionRules || []).length;
-      data.billNonConsumptionRules = (data.billNonConsumptionRules || []).filter((item) => item.id !== ruleId);
-      if (data.billNonConsumptionRules.length === before) return false;
-      refreshNonConsumptionFlags();
       save();
       return true;
     },
@@ -836,48 +724,6 @@ export function createStore() {
       bill.updatedAt = new Date().toISOString().slice(0, 10);
       save();
       return true;
-    },
-    createNonConsumptionRuleFromBill(id) {
-      const bill = findEntry("bills", id);
-      if (!bill) return false;
-      const keyword = String(bill.title || bill.description || bill.category || "").replace(/\s+/g, "").trim().slice(0, 32);
-      if (!keyword) return false;
-      return this.addBillNonConsumptionRule({
-        keyword,
-        note: `由流水创建：${bill.title || bill.date || ""}`.slice(0, 60),
-      });
-    },
-    applyBillClassificationRule(ruleId) {
-      const rule = (data.billClassificationRules || []).find((item) => item.id === ruleId);
-      if (!rule) return { applied: 0, matched: 0 };
-      let matched = 0;
-      let applied = 0;
-      const today = new Date().toISOString().slice(0, 10);
-      data.bills = (data.bills || []).map((bill) => {
-        if (!billMatchesClassificationRule(bill, rule)) return bill;
-        matched += 1;
-        const shouldUpdate = isUncategorizedCategory(bill.category) || bill.classification?.needsReview || bill.classification?.source === "unmatched";
-        if (!shouldUpdate) return bill;
-        applied += 1;
-        return {
-          ...bill,
-          category: rule.category,
-          fixedExpenseType: bill.fixedExpenseType || rule.fixedExpenseType || "",
-          classification: {
-            ...(bill.classification || {}),
-            category: rule.category,
-            confidence: rule.confidence || 99,
-            source: "memory",
-            reason: `命中记忆规则：${rule.keyword}`,
-            needsReview: false,
-            autoCategory: true,
-          },
-          tags: [...new Set([...(bill.tags || []), "规则回填"])],
-          updatedAt: today,
-        };
-      });
-      if (applied > 0) save();
-      return { applied, matched };
     },
     save,
     reset() {
@@ -1732,40 +1578,41 @@ export function createStore() {
     },
     importBills(items, options = {}) {
       const today = new Date().toISOString().slice(0, 10);
-      const useClassificationRules = options.importMode === "rules";
       const bills = items.map((item) => {
+        const importedType = item.type === "收入" || item.type === "支出" ? item.type : "待确认";
+        const isPendingType = importedType === "待确认";
         const base = {
           id: createId("b"),
           title: item.title,
           description: item.description || "",
-          type: item.type === "收入" ? "收入" : "支出",
+          type: importedType,
           amount: Number(item.amount || 0),
           category: item.category || "未分类",
           date: item.date || today,
           source: item.source || "Excel 导入",
           payer: item.payer || "家庭账户",
           familyMember: item.familyMember || "",
-          fixedExpenseType: item.fixedExpenseType || inferFixedExpenseType(item),
+          fixedExpenseType: item.fixedExpenseType || "",
           mortgageDueDay: item.mortgageDueDay || "",
           mortgageRemainingTerms: item.mortgageRemainingTerms || "",
           sourceTransactionId: item.sourceTransactionId || "",
           paymentMethod: item.paymentMethod || "",
           projectId: item.projectId || "",
-          tags: item.tags || [],
-          excludeFromAnalysis: Boolean(item.excludeFromAnalysis || item.analysisExcluded || inferNonConsumptionBillWithRules(item, data.billNonConsumptionRules)),
+          tags: [...new Set([...(item.tags || []), ...(isPendingType ? ["待确认"] : [])])],
+          analysisExcluded: Boolean(isPendingType || item.analysisExcluded),
+          excludeFromAnalysis: Boolean(isPendingType || item.excludeFromAnalysis || item.analysisExcluded),
           isFavorite: false,
           createdAt: today,
           updatedAt: today,
         };
-        if (useClassificationRules) return applyBillClassification(base, data.billClassificationRules);
         return {
           ...base,
           classification: {
             category: base.category,
-            confidence: base.category && base.category !== "未分类" ? 80 : 0,
+            confidence: base.category && base.category !== "未分类" ? 70 : 0,
             source: "raw",
-            reason: "原始账单模式导入，未自动分类",
-            needsReview: !base.category || base.category === "未分类",
+            reason: isPendingType ? "手动导入模式：文件未提供收支类型，需手动确认" : "手动导入模式：按文件收支类型导入，未套用预设规则",
+            needsReview: isPendingType || !base.category || base.category === "未分类",
           },
         };
       });
@@ -1828,7 +1675,7 @@ export function createStore() {
       const existing = entryId ? findEntry(type, entryId) : null;
       const payload = buildEntryPayload(formData, existing);
       const { type: nextType, originalType } = payload;
-      const entry = nextType === "bills" ? applyBillClassification(payload.entry, data.billClassificationRules) : payload.entry;
+      const entry = payload.entry;
       const current = findEntry(nextType, entry.id);
 
       if (originalType !== nextType) {
@@ -1838,10 +1685,8 @@ export function createStore() {
       if (current) {
         const index = data[nextType].findIndex((item) => item.id === entry.id);
         data[nextType][index] = { ...current, ...entry };
-        if (nextType === "bills") rememberBillClassification(data[nextType][index], current);
       } else {
         data[nextType].unshift(entry);
-        if (nextType === "bills") rememberBillClassification(entry, null);
       }
 
       save();
