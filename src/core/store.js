@@ -135,6 +135,325 @@ function buildLongTermFinanceReport(data, targetMonth) {
   ].join("\n");
 }
 
+function averageRows(rows, key) {
+  return rows.length ? rows.reduce((sum, row) => sum + Number(row[key] || 0), 0) / rows.length : 0;
+}
+
+function medianRows(rows, key) {
+  const values = rows.map((row) => Number(row[key] || 0)).filter((value) => Number.isFinite(value)).sort((left, right) => left - right);
+  if (!values.length) return 0;
+  const middle = Math.floor(values.length / 2);
+  return values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+}
+
+function getForecastExpenseBaseline(rows) {
+  const average = averageRows(rows, "expense");
+  const median = medianRows(rows, "expense") || average;
+  const threshold = Math.max(median * 1.75, average * 1.45, 1000);
+  const outliers = rows.filter((row) => Number(row.expense || 0) > threshold);
+  const regularRows = rows.filter((row) => Number(row.expense || 0) <= threshold);
+  return {
+    average,
+    median,
+    regularAverage: averageRows(regularRows.length ? regularRows : rows, "expense"),
+    threshold,
+    outliers,
+  };
+}
+
+function getFutureCommitmentsForForecast(data, month, months = 3) {
+  const match = String(month || "").match(/^(\d{4})-(\d{2})$/);
+  const base = match ? new Date(Number(match[1]), Number(match[2]) - 1, 1) : new Date();
+  const start = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}-01`;
+  const endDate = new Date(base.getFullYear(), base.getMonth() + months, 0);
+  const end = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`;
+  const planItems = ((data.budgets || {}).futurePlans || [])
+    .filter((item) => item.status !== "取消")
+    .filter((item) => {
+      const key = String(item.date || "").slice(0, 10);
+      return key >= start && key <= end;
+    })
+    .map((item) => ({ ...item, sourceLabel: "计划" }));
+  const subscriptionItems = (data.subscriptions || [])
+    .filter((item) => {
+      const key = String(item.nextRenewalDate || "").slice(0, 10);
+      return key >= start && key <= end;
+    })
+    .map((item) => ({
+      ...item,
+      title: item.name || "订阅续费",
+      amount: Number(item.monthlyCost || item.amount || 0),
+      sourceLabel: "订阅",
+    }));
+  return [...planItems, ...subscriptionItems];
+}
+
+function buildStoredForecastActualComparison(data, noteOrSummary) {
+  const report = noteOrSummary?.billReportSummary || noteOrSummary || {};
+  const forecast = report.forecast || {};
+  const forecastMonth = forecast.nextMonth || forecast.nextMonthMonth || forecast.month || "";
+  if (!/^\d{4}-\d{2}$/.test(forecastMonth)) return null;
+  const actual = summarizeBillsForMonth(data, forecastMonth);
+  const hasActual = actual.bills.length > 0 || actual.income > 0 || actual.expense > 0;
+  const predictedIncome = Number(forecast.nextMonthIncome ?? forecast.income ?? 0);
+  const predictedExpense = Number(forecast.nextMonthExpense ?? forecast.expense ?? 0);
+  const predictedBalance = Number(forecast.nextMonthBalance ?? forecast.balance ?? 0);
+  const unclassifiedCount = actual.bills.filter((item) => !item.category || item.category === "未分类").length;
+  const causeLabel = !hasActual
+    ? "待验证"
+    : unclassifiedCount > 0
+      ? "分类待补"
+      : predictedIncome > 0 && actual.income < predictedIncome * 0.68
+        ? "收入偏差"
+        : actual.expense > predictedExpense * 1.22
+          ? "支出偏差"
+          : actual.expense < predictedExpense * 0.78
+            ? "预测偏保守"
+            : "模型可沿用";
+  return {
+    month: forecastMonth,
+    hasActual,
+    causeLabel,
+    predictedIncome,
+    predictedExpense,
+    predictedBalance,
+    incomeDelta: actual.income - predictedIncome,
+    expenseDelta: actual.expense - predictedExpense,
+    balanceDelta: actual.balance - predictedBalance,
+    drift: Math.max(
+      Math.abs(actual.expense - predictedExpense) / Math.max(Math.abs(predictedExpense), Math.abs(actual.expense), 1),
+      Math.abs(actual.balance - predictedBalance) / Math.max(Math.abs(predictedBalance), Math.abs(actual.balance), 1),
+    ),
+  };
+}
+
+function buildStoredForecastBiasAdjustment(data) {
+  const checks = (data.notes || [])
+    .filter((item) => item.noteType === "summary" && item.billReportSummary?.forecast)
+    .map((item) => buildStoredForecastActualComparison(data, item))
+    .filter((item) => item && item.hasActual)
+    .sort((left, right) => String(right.month || "").localeCompare(String(left.month || "")))
+    .slice(0, 6);
+  if (!checks.length) return { count: 0, income: 0, expense: 0, balance: 0, label: "暂无校准样本", excludedCount: 0 };
+  const preparedChecks = checks.map((item) => {
+    const hasPrediction = Math.abs(Number(item.predictedIncome || 0)) + Math.abs(Number(item.predictedExpense || 0)) + Math.abs(Number(item.predictedBalance || 0)) > 0;
+    const excludeReason = item.causeLabel === "分类待补"
+      ? "分类待补"
+      : !hasPrediction
+        ? "缺少预测值"
+        : Number(item.drift || 0) > 1.2
+          ? "极端偏差"
+          : "";
+    return { ...item, usedForCalibration: !excludeReason, excludeReason };
+  });
+  const rows = preparedChecks.filter((item) => item.usedForCalibration);
+  if (!rows.length) return { count: 0, income: 0, expense: 0, balance: 0, label: "样本待清理", excludedCount: preparedChecks.length };
+  const weightSum = rows.reduce((sum, _item, index) => sum + (rows.length - index), 0) || 1;
+  const weighted = (key) => rows.reduce((sum, item, index) => sum + Number(item[key] || 0) * (rows.length - index), 0) / weightSum;
+  const sampleWeight = rows.length >= 4 ? 0.38 : rows.length >= 2 ? 0.26 : 0.16;
+  return {
+    count: rows.length,
+    income: weighted("incomeDelta") * sampleWeight,
+    expense: weighted("expenseDelta") * sampleWeight,
+    balance: weighted("balanceDelta") * sampleWeight,
+    label: rows.length >= 4 ? "高" : rows.length >= 2 ? "中" : "低",
+    excludedCount: preparedChecks.filter((item) => !item.usedForCalibration).length,
+  };
+}
+
+function buildFinanceForecastReport(data, targetMonth) {
+  const months = [...new Set((data.bills || [])
+    .filter((item) => !isBillExcludedFromAnalysis(item))
+    .map((item) => String(item.date || "").slice(0, 7))
+    .filter((month) => /^\d{4}-\d{2}$/.test(month)))]
+    .sort();
+  const rows = months.map((month) => {
+    const summary = summarizeBillsForMonth(data, month);
+    const fixedExpense = summary.expenseItems.filter((item) => inferFixedExpenseType(item)).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    return { ...summary, fixedExpense };
+  });
+  const recent3 = rows.slice(-3);
+  const previous3 = rows.slice(-6, -3);
+  const expenseBaseline = getForecastExpenseBaseline(rows);
+  const recentExpenseBaseline = getForecastExpenseBaseline(recent3);
+  const nextMonth = getRelativeMonthKey(targetMonth, 1);
+  const nextYear = String(Number(targetMonth.slice(0, 4)) + 1);
+  const historicalIncome = averageRows(rows, "income");
+  const historicalExpense = averageRows(rows, "expense");
+  const regularHistoricalExpense = expenseBaseline.regularAverage;
+  const historicalBalance = averageRows(rows, "balance");
+  const recentIncome = averageRows(recent3, "income");
+  const recentExpense = averageRows(recent3, "expense");
+  const recentRegularExpense = recentExpenseBaseline.regularAverage;
+  const previousExpense = averageRows(previous3, "expense");
+  const expenseTrend = previousExpense > 0 ? recentExpense - previousExpense : recentExpense - historicalExpense;
+  const categoryMap = rows.reduce((map, row) => {
+    row.categoryTotals.forEach((item) => {
+      map[item.category] = map[item.category] || { category: item.category, total: 0, months: 0, recent: 0, previous: 0 };
+      map[item.category].total += Number(item.amount || 0);
+      map[item.category].months += 1;
+    });
+    return map;
+  }, {});
+  recent3.forEach((row) => row.categoryTotals.forEach((item) => {
+    if (!categoryMap[item.category]) categoryMap[item.category] = { category: item.category, total: 0, months: 0, recent: 0, previous: 0 };
+    categoryMap[item.category].recent += Number(item.amount || 0);
+  }));
+  previous3.forEach((row) => row.categoryTotals.forEach((item) => {
+    if (!categoryMap[item.category]) categoryMap[item.category] = { category: item.category, total: 0, months: 0, recent: 0, previous: 0 };
+    categoryMap[item.category].previous += Number(item.amount || 0);
+  }));
+  const categoryTrendRows = Object.values(categoryMap)
+    .map((item) => {
+      const monthlyAverage = item.months ? item.total / item.months : 0;
+      const recentAverage = item.recent / Math.max(recent3.length, 1);
+      const previousAverage = item.previous / Math.max(previous3.length, 1);
+      const growth = recentAverage - previousAverage;
+      const trend = growth > Math.max(monthlyAverage * 0.18, 50) ? "增长" : growth < -Math.max(monthlyAverage * 0.18, 50) ? "回落" : "稳定";
+      return { ...item, monthlyAverage, recentAverage, previousAverage, growth, trend };
+    })
+    .filter((item) => item.monthlyAverage > 0 || item.recentAverage > 0)
+    .sort((left, right) => Math.abs(right.growth) - Math.abs(left.growth) || right.recentAverage - left.recentAverage)
+    .slice(0, 4);
+  const nextCommitments = getFutureCommitmentsForForecast(data, nextMonth, 3);
+  const annualCommitments = getFutureCommitmentsForForecast(data, nextMonth, 12);
+  const subscriptionMonthly = (data.subscriptions || []).reduce((sum, item) => sum + Number(item.monthlyCost || item.amount || 0), 0);
+  const biasAdjustment = buildStoredForecastBiasAdjustment(data);
+  let forecastIncome = Math.max(0, historicalIncome * 0.62 + recentIncome * 0.38);
+  const fixedHistoricalExpense = averageRows(rows, "fixedExpense");
+  const fixedRecentExpense = averageRows(recent3, "fixedExpense");
+  const fixedForecast = Math.max(0, fixedHistoricalExpense * 0.55 + fixedRecentExpense * 0.45);
+  const plannedCommitments = nextCommitments.filter((item) => item.sourceLabel !== "订阅" && item.planType !== "订阅续费");
+  const planForecast = plannedCommitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const normalExpenseBase = Math.max(regularHistoricalExpense - fixedHistoricalExpense - subscriptionMonthly, 0);
+  const recentNormalExpenseBase = Math.max(recentRegularExpense - fixedRecentExpense - subscriptionMonthly, 0);
+  const dailyForecast = Math.max(0, normalExpenseBase * 0.5 + recentNormalExpenseBase * 0.4 + Math.max(expenseTrend, 0) * 0.1);
+  const abnormalForecast = expenseBaseline.outliers.reduce((sum, row) => sum + Math.max(Number(row.expense || 0) - regularHistoricalExpense, 0), 0);
+  const expenseBreakdown = {
+    fixed: fixedForecast,
+    subscription: subscriptionMonthly,
+    daily: dailyForecast,
+    plan: planForecast,
+    abnormalExcluded: abnormalForecast,
+  };
+  let forecastExpense = Math.max(0, expenseBreakdown.fixed + expenseBreakdown.subscription + expenseBreakdown.daily + expenseBreakdown.plan * 0.72 + Math.max(expenseTrend, 0) * 0.08);
+  const incomeCap = Math.max(forecastIncome * 0.18, 120);
+  const expenseCap = Math.max(forecastExpense * 0.2, 120);
+  const appliedIncomeAdjustment = Math.max(-incomeCap, Math.min(incomeCap, biasAdjustment.income));
+  const appliedExpenseAdjustment = Math.max(-expenseCap, Math.min(expenseCap, biasAdjustment.expense));
+  forecastIncome = Math.max(0, forecastIncome + appliedIncomeAdjustment);
+  forecastExpense = Math.max(0, forecastExpense + appliedExpenseAdjustment);
+  const forecastBalance = forecastIncome - forecastExpense;
+  const uncertaintyRate = rows.length >= 6 && !expenseBaseline.outliers.length ? 0.08 : rows.length >= 3 ? 0.14 : 0.22;
+  const incomeSwing = Math.max(forecastIncome > 0 ? forecastIncome * uncertaintyRate : 0, forecastIncome > 0 ? 80 : 0);
+  const expenseSwing = Math.max(Math.abs(expenseTrend) * 0.35, forecastExpense > 0 ? forecastExpense * (uncertaintyRate + 0.04) : 0, forecastExpense > 0 ? 80 : 0);
+  const predictionRange = {
+    income: {
+      low: Math.max(0, forecastIncome - incomeSwing),
+      mid: forecastIncome,
+      high: forecastIncome + incomeSwing,
+    },
+    expense: {
+      low: Math.max(0, forecastExpense - expenseSwing * 0.65),
+      mid: forecastExpense,
+      high: forecastExpense + expenseSwing,
+    },
+    balance: {
+      low: Math.max(0, forecastIncome - incomeSwing) - (forecastExpense + expenseSwing),
+      mid: forecastBalance,
+      high: (forecastIncome + incomeSwing) - Math.max(0, forecastExpense - expenseSwing * 0.65),
+    },
+    riskLine: Math.max(forecastIncome * 0.08, expenseBreakdown.fixed * 0.25, forecastExpense > 0 ? 300 : 0),
+    uncertaintyRate,
+  };
+  const riskScenarioExtra = Math.max(expenseBreakdown.daily * 0.16, expenseBreakdown.plan * 0.18, expenseSwing * 0.35);
+  const scenarios = [
+    { key: "optimistic", label: "乐观", income: predictionRange.income.high, expense: predictionRange.expense.low, text: "支出控制良好，计划支出按低位发生。" },
+    { key: "normal", label: "正常", income: forecastIncome, expense: forecastExpense, text: "按当前全库基线、近期趋势和已知计划推演。" },
+    { key: "pressure", label: "压力", income: forecastIncome, expense: Math.max(forecastExpense, predictionRange.expense.high), text: "日常消费或未来计划继续抬高。" },
+    { key: "risk", label: "风险", income: predictionRange.income.low, expense: predictionRange.expense.high + riskScenarioExtra, text: "收入低位叠加支出上行，现金流安全边际被压缩。" },
+  ].map((item) => ({
+    ...item,
+    balance: item.income - item.expense,
+    tone: item.income - item.expense < predictionRange.riskLine ? "risk" : item.income - item.expense < forecastIncome * 0.12 ? "watch" : "good",
+  }));
+  const annualIncome = forecastIncome * 12;
+  const annualExpense = forecastExpense * 12 + annualCommitments.reduce((sum, item) => sum + Number(item.amount || 0), 0) * 0.18;
+  const annualBalance = annualIncome - annualExpense;
+  const expenseRate = forecastIncome > 0 ? forecastExpense / forecastIncome : 0;
+  const riskItems = [
+    forecastBalance < 0 ? `- 高风险：${nextMonth} 预计结余 ¥${forecastBalance.toFixed(2)}，可能出现负结余。` : "",
+    expenseRate >= 0.82 ? `- 关注：${nextMonth} 预计支出率 ${Math.round(expenseRate * 100)}%，自由支配空间偏紧。` : "",
+    expenseTrend > Math.max(historicalExpense * 0.12, 80) ? `- 关注：近 3 个月支出较前期月均增加 ¥${expenseTrend.toFixed(2)}。` : "",
+    expenseBaseline.outliers.length ? `- 关注：${expenseBaseline.outliers.map((row) => row.month).join("、")} 存在异常支出波动，预测已降低其权重。` : "",
+    nextCommitments.length ? `- 已知压力：未来 3 个月计划/续费 ${nextCommitments.length} 项，合计 ¥${nextCommitments.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2)}。` : "",
+    annualBalance < 0 ? `- 年度风险：按当前趋势推演，${nextYear} 年预计结余为 ¥${annualBalance.toFixed(2)}。` : "",
+  ].filter(Boolean);
+  const level = forecastBalance < 0 || annualBalance < 0 ? "高风险" : expenseRate >= 0.82 || expenseTrend > Math.max(historicalExpense * 0.12, 80) ? "关注" : rows.length < 3 ? "可控" : "健康";
+  const confidence = rows.length < 3 ? "低" : expenseBaseline.outliers.length >= Math.max(2, Math.ceil(rows.length / 3)) ? "中" : rows.length >= 6 ? "高" : "中";
+  const actions = [
+    expenseRate >= 0.82 ? "- 下月前 10 天按日均支出观察，超节奏时暂停非必要消费。" : "",
+    nextCommitments.length ? `- 提前预留未来计划/订阅资金，优先覆盖 ¥${Math.min(nextCommitments.reduce((sum, item) => sum + Number(item.amount || 0), 0), Math.max(forecastIncome * 0.2, 0)).toFixed(2)}。` : "",
+    subscriptionMonthly > 0 ? `- 复核订阅月均 ¥${subscriptionMonthly.toFixed(2)}，非必要项目暂停新增。` : "",
+    forecastBalance < 0 ? "- 先补齐收入或减少可变支出，避免下月现金流转负。" : "- 月底对比预测和实际偏差，校准下一轮预算。",
+  ].filter(Boolean);
+  const categoryTrendLine = categoryTrendRows.map((item) => `- ${item.category}：${item.trend}，近 3 月月均 ¥${item.recentAverage.toFixed(2)}，较前期 ${item.growth >= 0 ? "+" : "-"}¥${Math.abs(item.growth).toFixed(2)}。`).join("\n") || "- 暂无稳定分类趋势。";
+  return {
+    summary: {
+      level,
+      confidence,
+      nextMonth,
+      nextMonthIncome: forecastIncome,
+      nextMonthExpense: forecastExpense,
+      nextMonthBalance: forecastBalance,
+      nextMonthExpenseRate: Math.round(expenseRate * 100),
+      nextYear,
+      nextYearIncome: annualIncome,
+      nextYearExpense: annualExpense,
+      nextYearBalance: annualBalance,
+      regularHistoricalExpense,
+      expenseBreakdown,
+      predictionRange,
+      scenarios,
+      outlierMonths: expenseBaseline.outliers.map((row) => row.month),
+      calibrationAdjustment: {
+        count: biasAdjustment.count,
+        confidence: biasAdjustment.label,
+        income: appliedIncomeAdjustment,
+        expense: appliedExpenseAdjustment,
+        balance: appliedIncomeAdjustment - appliedExpenseAdjustment,
+        excludedCount: biasAdjustment.excludedCount,
+      },
+      categoryTrends: categoryTrendRows.map((item) => ({
+        category: item.category,
+        trend: item.trend,
+        recentAverage: item.recentAverage,
+        growth: item.growth,
+      })),
+    },
+    markdown: [
+      `- 风险等级：${level}，可信度：${confidence}。`,
+      `- 历史基线：月均收入 ¥${historicalIncome.toFixed(2)}，原始月均支出 ¥${historicalExpense.toFixed(2)}，常规月均支出 ¥${regularHistoricalExpense.toFixed(2)}，月均结余 ¥${historicalBalance.toFixed(2)}。`,
+      `- 支出拆分预测：固定 ¥${expenseBreakdown.fixed.toFixed(2)}，订阅 ¥${expenseBreakdown.subscription.toFixed(2)}，日常 ¥${expenseBreakdown.daily.toFixed(2)}，未来计划 ¥${expenseBreakdown.plan.toFixed(2)}，异常排除 ¥${expenseBreakdown.abnormalExcluded.toFixed(2)}。`,
+      `- 预测区间：收入 ¥${predictionRange.income.low.toFixed(2)} - ¥${predictionRange.income.high.toFixed(2)}，支出 ¥${predictionRange.expense.low.toFixed(2)} - ¥${predictionRange.expense.high.toFixed(2)}，结余 ¥${predictionRange.balance.low.toFixed(2)} - ¥${predictionRange.balance.high.toFixed(2)}，风险线 ¥${predictionRange.riskLine.toFixed(2)}。`,
+      `- 情景推演：${scenarios.map((item) => `${item.label}结余 ¥${item.balance.toFixed(2)}`).join("；")}。`,
+      expenseBaseline.outliers.length ? `- 异常波动月份：${expenseBaseline.outliers.map((row) => `${row.month} ¥${Number(row.expense || 0).toFixed(2)}`).join("；")}。` : "- 异常波动月份：暂无明显异常。",
+      biasAdjustment.count ? `- 模型修正：基于 ${biasAdjustment.count} 个已验证月报样本，收入修正 ${appliedIncomeAdjustment >= 0 ? "+" : "-"}¥${Math.abs(appliedIncomeAdjustment).toFixed(2)}，支出修正 ${appliedExpenseAdjustment >= 0 ? "+" : "-"}¥${Math.abs(appliedExpenseAdjustment).toFixed(2)}。` : "- 模型修正：暂无可用预测复盘样本，暂按全库基线推演。",
+      `- ${nextMonth} 预测：收入 ¥${forecastIncome.toFixed(2)}，支出 ¥${forecastExpense.toFixed(2)}，结余 ¥${forecastBalance.toFixed(2)}，预计支出率 ${Math.round(expenseRate * 100)}%。`,
+      `- ${nextYear} 年预测：收入 ¥${annualIncome.toFixed(2)}，支出 ¥${annualExpense.toFixed(2)}，结余 ¥${annualBalance.toFixed(2)}。`,
+      "",
+      "### 风险来源",
+      riskItems.join("\n") || "- 暂未发现明显预测风险。",
+      "",
+      "### 分类趋势",
+      categoryTrendLine,
+      "",
+      "### 建议动作",
+      actions.join("\n") || "- 保持分类记录完整，继续观察趋势。",
+    ].join("\n"),
+  };
+}
+
 function scoreByRate(rate, ranges) {
   const currentRate = Number(rate || 0);
   return ranges.find((item) => currentRate <= item.max)?.score ?? ranges[ranges.length - 1]?.score ?? 60;
@@ -1180,6 +1499,7 @@ export function createStore() {
       const riskText = riskLines.join("\n") || "- 未触发明显风险规则，保持分类、预算和未来计划录入。";
       const comparisonLine = buildMonthlyComparisonReport(currentSummary, previousSummary);
       const longTermLine = buildLongTermFinanceReport(data, targetMonth);
+      const forecastReport = buildFinanceForecastReport(data, targetMonth);
       const qualityIssues = [
         income <= 0 && expense > 0 ? `缺少收入：本月已有支出 ¥${expense.toFixed(2)}，但没有收入参照。` : "",
         expenseItems.filter((item) => !item.category || item.category === "未分类").length
@@ -1190,10 +1510,23 @@ export function createStore() {
           : "",
         excludedBills.length ? `不计入分析流水：${excludedBills.length} 笔，可能影响月报完整性。` : "",
       ].filter(Boolean);
+      const validMonths = [...new Set((data.bills || [])
+        .filter((item) => !isBillExcludedFromAnalysis(item))
+        .map((item) => String(item.date || "").slice(0, 7))
+        .filter((item) => /^\d{4}-\d{2}$/.test(item)))].length;
+      const qualityPenalty =
+        (validMonths < 3 ? 22 : validMonths < 6 ? 10 : 0)
+        + (income <= 0 && expense > 0 ? 20 : 0)
+        + Math.min(18, expenseItems.filter((item) => !item.category || item.category === "未分类").length * 3)
+        + Math.min(10, expenseItems.filter((item) => !item.payer || item.payer === "未指定").length * 2)
+        + (totalBudget > 0 ? 0 : 6)
+        + Math.min(8, excludedBills.length * 2);
+      const qualityScore = Math.max(0, Math.min(100, Math.round(100 - qualityPenalty)));
+      const qualityConfidence = qualityScore >= 86 ? "高" : qualityScore >= 70 ? "中" : "低";
       const qualityStatus = qualityIssues.length >= 3 ? "需复核" : qualityIssues.length ? "需补录" : "完整";
       const qualityLine = qualityIssues.length
-        ? qualityIssues.map((item) => `- ${item}`).join("\n")
-        : "- 数据完整度良好，可作为本月判断依据。";
+        ? [`- 数据质量评分：${qualityScore} 分，预测可信度：${qualityConfidence}。`, ...qualityIssues.map((item) => `- ${item}`)].join("\n")
+        : `- 数据质量评分：${qualityScore} 分，预测可信度：${qualityConfidence}。数据完整度良好，可作为本月判断依据。`;
       const budgetLine = [
         totalBudget > 0 ? `- 总预算：¥${totalBudget.toFixed(2)}，已用 ¥${expense.toFixed(2)}，剩余 ¥${remainingBudget.toFixed(2)}。` : "- 未设置总预算。",
         totalBudget > 0 ? `- 预算节奏：时间进度 ${elapsedRate}%，预算使用 ${budgetUsedRate}%，判断为「${paceLabel}」。` : "- 无法计算预算节奏。",
@@ -1233,6 +1566,9 @@ export function createStore() {
         "",
         "## 长期问题统计",
         longTermLine,
+        "",
+        "## 长期预测与风险预告",
+        forecastReport.markdown,
         "",
         "## 数据质量检查",
         qualityLine,
@@ -1282,7 +1618,10 @@ export function createStore() {
         actionTotal,
         futureGap,
         qualityStatus,
+        qualityScore,
+        qualityConfidence,
         qualityIssues,
+        forecast: forecastReport.summary,
         updatedAt: today,
       };
       const existing = (data.notes || []).find((item) => item.noteType === "summary" && (item.title === title || item.title === legacyTitle || item.billReportMonth === targetMonth));

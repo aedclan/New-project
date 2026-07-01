@@ -7839,6 +7839,884 @@ h1 {
   font-weight: 720;
 }
 
+.bill-forecast-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.bill-forecast-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--success) 22%, var(--line));
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 8%, transparent), transparent 55%),
+    color-mix(in srgb, var(--surface) 90%, var(--bg));
+  padding: 9px 10px;
+}
+
+.bill-forecast-panel--risk .bill-forecast-hero {
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--danger) 8%, transparent), transparent 55%),
+    color-mix(in srgb, var(--surface) 90%, var(--bg));
+}
+
+.bill-forecast-panel--watch .bill-forecast-hero,
+.bill-forecast-panel--stable .bill-forecast-hero {
+  border-color: color-mix(in srgb, var(--warning) 28%, var(--line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--warning) 8%, transparent), transparent 55%),
+    color-mix(in srgb, var(--surface) 90%, var(--bg));
+}
+
+.bill-forecast-hero div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.bill-forecast-hero span,
+.bill-forecast-metrics span,
+.bill-forecast-stack span,
+.bill-forecast-list h3 {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 760;
+}
+
+.bill-forecast-hero strong {
+  color: var(--success);
+  font-size: 20px;
+  font-weight: 860;
+  line-height: 1.05;
+}
+
+.bill-forecast-panel--risk .bill-forecast-hero strong {
+  color: var(--danger);
+}
+
+.bill-forecast-panel--watch .bill-forecast-hero strong,
+.bill-forecast-panel--stable .bill-forecast-hero strong {
+  color: var(--warning);
+}
+
+.bill-forecast-hero p {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.42;
+}
+
+.bill-forecast-hero b {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--success) 12%, var(--surface));
+  color: var(--success);
+  font-size: 16px;
+  font-weight: 860;
+}
+
+.bill-forecast-panel--risk .bill-forecast-hero b {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  color: var(--danger);
+}
+
+.bill-forecast-panel--watch .bill-forecast-hero b,
+.bill-forecast-panel--stable .bill-forecast-hero b {
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+  color: var(--warning);
+}
+
+.bill-forecast-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.bill-forecast-category-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.bill-data-quality-strip {
+  display: grid;
+  grid-template-columns: 1.25fr repeat(3, minmax(0, 0.85fr));
+  gap: 6px;
+}
+
+.bill-data-quality-strip article,
+.bill-data-quality-issue {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--success) 18%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 5%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface) 91%, var(--bg));
+  padding: 7px 8px;
+}
+
+.bill-data-quality-strip--watch article {
+  border-color: color-mix(in srgb, var(--warning) 25%, var(--line));
+}
+
+.bill-data-quality-strip--risk article,
+.bill-data-quality-issue--risk {
+  border-color: color-mix(in srgb, var(--danger) 25%, var(--line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--danger) 5%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface) 91%, var(--bg));
+}
+
+.bill-data-quality-strip article:first-child,
+.bill-data-quality-issue {
+  cursor: pointer;
+}
+
+.bill-data-quality-strip span,
+.bill-data-quality-issue span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-data-quality-strip strong,
+.bill-data-quality-issue strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 820;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-data-quality-strip small {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--weak);
+  font-size: 10.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-data-quality-issues {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.bill-data-quality-issue {
+  display: grid;
+  gap: 3px;
+}
+
+.bill-data-quality-issue--watch {
+  border-color: color-mix(in srgb, var(--warning) 25%, var(--line));
+}
+
+.bill-forecast-breakdown {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.bill-forecast-range-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.bill-forecast-range-grid article {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--success) 22%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 7%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface) 91%, var(--bg));
+  padding: 8px 9px;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.bill-forecast-range-grid article:hover {
+  border-color: color-mix(in srgb, var(--success) 34%, var(--line));
+  background: color-mix(in srgb, var(--success) 6%, var(--surface));
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--success) 10%, transparent);
+  transform: translateY(-1px);
+}
+
+.bill-forecast-range-grid span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-range-grid strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 840;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-range-grid small {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--weak);
+  font-size: 10.5px;
+  font-weight: 660;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.bill-forecast-scenario {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--success) 20%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 5%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface) 91%, var(--bg));
+  padding: 8px 9px;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.bill-forecast-scenario:hover {
+  border-color: color-mix(in srgb, var(--success) 32%, var(--line));
+  background: color-mix(in srgb, var(--success) 6%, var(--surface));
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--success) 9%, transparent);
+  transform: translateY(-1px);
+}
+
+.bill-forecast-scenario--watch {
+  border-color: color-mix(in srgb, var(--warning) 28%, var(--line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--warning) 6%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface) 91%, var(--bg));
+}
+
+.bill-forecast-scenario--risk {
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--danger) 6%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface) 91%, var(--bg));
+}
+
+.bill-forecast-scenario span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-scenario strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 840;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-scenario--risk strong {
+  color: var(--danger);
+}
+
+.bill-forecast-scenario--watch strong {
+  color: color-mix(in srgb, var(--warning) 76%, var(--text));
+}
+
+.bill-forecast-scenario small {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--weak);
+  font-size: 10.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-review-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.bill-forecast-review-board article {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--success) 20%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 5%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface) 91%, var(--bg));
+  padding: 8px 9px;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.bill-forecast-review-board article:hover {
+  border-color: color-mix(in srgb, var(--success) 32%, var(--line));
+  background: color-mix(in srgb, var(--success) 6%, var(--surface));
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--success) 9%, transparent);
+  transform: translateY(-1px);
+}
+
+.bill-forecast-review-board--watch article {
+  border-color: color-mix(in srgb, var(--warning) 26%, var(--line));
+}
+
+.bill-forecast-review-board--risk article {
+  border-color: color-mix(in srgb, var(--danger) 26%, var(--line));
+}
+
+.bill-forecast-review-board span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-review-board strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 840;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-review-board--risk strong {
+  color: var(--danger);
+}
+
+.bill-forecast-review-board--watch strong {
+  color: color-mix(in srgb, var(--warning) 76%, var(--text));
+}
+
+.bill-forecast-review-board small {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--weak);
+  font-size: 10.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-breakdown article {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 4%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface) 91%, var(--bg));
+  padding: 7px 8px;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.bill-forecast-breakdown article:hover {
+  border-color: color-mix(in srgb, var(--success) 28%, var(--line));
+  background: color-mix(in srgb, var(--success) 5%, var(--surface));
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--success) 9%, transparent);
+  transform: translateY(-1px);
+}
+
+.bill-forecast-breakdown span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-breakdown strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 820;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-breakdown small {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--weak);
+  font-size: 10.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-calibration-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 0.85fr);
+  gap: 6px;
+}
+
+.bill-forecast-calibration-strip article {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  border: 1px solid color-mix(in srgb, var(--success) 18%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 5%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface) 91%, var(--bg));
+  padding: 7px 8px;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.bill-forecast-calibration-strip article:hover {
+  border-color: color-mix(in srgb, var(--success) 30%, var(--line));
+  background: color-mix(in srgb, var(--success) 5%, var(--surface));
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--success) 9%, transparent);
+  transform: translateY(-1px);
+}
+
+.bill-forecast-calibration-strip--watch article {
+  border-color: color-mix(in srgb, var(--warning) 24%, var(--line));
+}
+
+.bill-forecast-calibration-strip--risk article {
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--line));
+}
+
+.bill-forecast-calibration-strip span {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 760;
+}
+
+.bill-forecast-calibration-strip strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 820;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-calibration-strip small {
+  overflow: hidden;
+  color: var(--weak);
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-quality-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px dashed color-mix(in srgb, var(--warning) 30%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 6%, var(--surface));
+  padding: 7px 9px;
+}
+
+.bill-forecast-quality-note strong {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--warning) 76%, var(--text));
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.bill-forecast-quality-note span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-metrics article,
+.bill-forecast-category,
+.bill-forecast-stack article,
+.bill-forecast-risk,
+.bill-forecast-action {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 91%, var(--bg));
+  padding: 7px;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.bill-forecast-metrics article:hover,
+.bill-forecast-category:hover,
+.bill-forecast-stack article:hover,
+.bill-forecast-risk:hover,
+.bill-forecast-action:hover {
+  border-color: color-mix(in srgb, var(--success) 28%, var(--line));
+  background: color-mix(in srgb, var(--success) 5%, var(--surface));
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--success) 10%, transparent);
+  transform: translateY(-1px);
+}
+
+.bill-forecast-metrics article {
+  display: grid;
+  gap: 3px;
+}
+
+.bill-forecast-category {
+  display: grid;
+  gap: 3px;
+}
+
+.bill-forecast-metrics strong,
+.bill-forecast-category strong,
+.bill-forecast-stack strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 790;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-metrics small,
+.bill-forecast-category small,
+.bill-forecast-stack p,
+.bill-forecast-risk small {
+  overflow: hidden;
+  margin: 0;
+  color: var(--weak);
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-category--up {
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--line));
+  background: color-mix(in srgb, var(--danger) 5%, var(--surface));
+}
+
+.bill-forecast-category--up strong {
+  color: var(--danger);
+}
+
+.bill-forecast-category--down {
+  border-color: color-mix(in srgb, var(--success) 24%, var(--line));
+  background: color-mix(in srgb, var(--success) 5%, var(--surface));
+}
+
+.bill-forecast-category--down strong {
+  color: var(--success);
+}
+
+.bill-forecast-category--flat {
+  border-color: color-mix(in srgb, var(--line) 86%, transparent);
+}
+
+.bill-forecast-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.85fr) minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.bill-forecast-stack,
+.bill-forecast-list {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.bill-forecast-list h3 {
+  margin: 0;
+}
+
+.bill-forecast-risk {
+  display: grid;
+  gap: 3px;
+}
+
+.bill-forecast-risk strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-risk p,
+.bill-forecast-action span {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.38;
+}
+
+.bill-forecast-risk--risk {
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--line));
+  background: color-mix(in srgb, var(--danger) 6%, var(--surface));
+}
+
+.bill-forecast-risk--watch {
+  border-color: color-mix(in srgb, var(--warning) 28%, var(--line));
+  background: color-mix(in srgb, var(--warning) 6%, var(--surface));
+}
+
+.bill-forecast-detail-panel {
+  width: min(580px, calc(100vw - 28px));
+  overflow: hidden;
+}
+
+.bill-forecast-detail-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+
+.bill-forecast-detail-hero {
+  display: grid;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--success) 24%, var(--line));
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 10%, transparent), transparent),
+    color-mix(in srgb, var(--surface) 74%, transparent);
+  padding: 12px;
+  backdrop-filter: blur(14px);
+}
+
+.bill-forecast-detail-hero span,
+.bill-forecast-detail-grid span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.bill-forecast-detail-hero strong {
+  color: var(--success);
+  font-size: 20px;
+  font-weight: 860;
+  line-height: 1.15;
+}
+
+.bill-forecast-detail-hero p,
+.bill-forecast-detail-grid p {
+  margin: 0;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.bill-forecast-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.bill-forecast-detail-grid article {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  padding: 9px;
+  backdrop-filter: blur(12px);
+}
+
+.bill-forecast-sample-list {
+  display: grid;
+  gap: 7px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.bill-forecast-sample-list__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.bill-forecast-sample-list__head span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.bill-forecast-sample-list__head strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.bill-forecast-sample-list article {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.55fr) minmax(0, 1.45fr);
+  gap: 8px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  padding: 8px;
+}
+
+.bill-forecast-sample-list article.is-used {
+  border-color: color-mix(in srgb, var(--success) 18%, var(--line));
+}
+
+.bill-forecast-sample-list article.is-excluded {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--weak) 28%, var(--line));
+  background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+  opacity: 0.82;
+}
+
+.bill-forecast-sample-list article > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.bill-forecast-sample-list article strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-sample-list article span {
+  overflow: hidden;
+  color: var(--weak);
+  font-size: 10.5px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-sample-list dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.bill-forecast-sample-list dl div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.bill-forecast-sample-list dt {
+  overflow: hidden;
+  color: var(--weak);
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-sample-list dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-forecast-sample-list .is-good {
+  color: var(--success);
+}
+
+.bill-forecast-sample-list .is-risk {
+  color: var(--danger);
+}
+
 .bill-metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -8229,6 +9107,14 @@ h1 {
   color: var(--danger);
 }
 
+.bill-report-history-metrics .is-watch {
+  color: var(--warning);
+}
+
+.bill-report-history-metrics .is-pending {
+  color: var(--weak);
+}
+
 .bill-report-history-item small {
   white-space: nowrap;
 }
@@ -8388,6 +9274,262 @@ h1 {
   font-weight: 680;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.bill-report-forecast-snapshot {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--success) 20%, var(--line));
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 7%, transparent), transparent 58%),
+    color-mix(in srgb, var(--surface) 82%, transparent);
+  padding: 12px;
+  backdrop-filter: blur(12px);
+}
+
+.bill-report-forecast-snapshot__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.bill-report-forecast-snapshot__head span,
+.bill-report-forecast-snapshot article span {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 780;
+  letter-spacing: 0.02em;
+}
+
+.bill-report-forecast-snapshot__head h2 {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 840;
+  line-height: 1.2;
+}
+
+.bill-report-forecast-snapshot__head strong {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--success) 12%, var(--surface));
+  color: var(--success);
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.bill-report-forecast-snapshot__quality,
+.bill-report-forecast-snapshot__range,
+.bill-report-forecast-snapshot__scenarios {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.bill-report-forecast-snapshot__breakdown {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.bill-report-forecast-snapshot article {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  padding: 8px;
+}
+
+.bill-report-forecast-snapshot article strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 820;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-report-forecast-snapshot article small {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--weak);
+  font-size: 10.5px;
+  font-weight: 660;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-report-forecast-snapshot .is-risk strong {
+  color: var(--danger);
+}
+
+.bill-report-forecast-snapshot .is-watch strong {
+  color: color-mix(in srgb, var(--warning) 76%, var(--text));
+}
+
+.bill-report-forecast-check {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 7%, transparent), transparent 58%),
+    color-mix(in srgb, var(--surface) 82%, transparent);
+  padding: 12px;
+  backdrop-filter: blur(12px);
+}
+
+.bill-report-forecast-check--risk {
+  border-color: color-mix(in srgb, var(--danger) 26%, var(--line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--danger) 7%, transparent), transparent 58%),
+    color-mix(in srgb, var(--surface) 84%, transparent);
+}
+
+.bill-report-forecast-check--watch {
+  border-color: color-mix(in srgb, var(--warning) 28%, var(--line));
+}
+
+.bill-report-forecast-check__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.bill-report-forecast-check__head span {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 780;
+  letter-spacing: 0.02em;
+}
+
+.bill-report-forecast-check__head h2 {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 840;
+  line-height: 1.2;
+}
+
+.bill-report-forecast-check__head strong {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--success) 12%, var(--surface));
+  color: var(--success);
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.bill-report-forecast-check--risk .bill-report-forecast-check__head strong {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  color: var(--danger);
+}
+
+.bill-report-forecast-check--watch .bill-report-forecast-check__head strong {
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface));
+  color: color-mix(in srgb, var(--warning) 80%, var(--text));
+}
+
+.bill-report-forecast-check--pending .bill-report-forecast-check__head strong {
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  color: var(--weak);
+}
+
+.bill-report-forecast-check__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.bill-report-forecast-check__grid article {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  padding: 9px;
+}
+
+.bill-report-forecast-check__grid span {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 760;
+}
+
+.bill-report-forecast-check__grid strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 820;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bill-report-forecast-check__grid small {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--weak);
+  font-size: 10.5px;
+  font-weight: 660;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.bill-report-forecast-calibration {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.bill-report-forecast-calibration article {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--success) 18%, var(--line));
+  border-radius: 9px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 5%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface) 82%, transparent);
+  padding: 10px;
+}
+
+.bill-report-forecast-calibration span {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 760;
+}
+
+.bill-report-forecast-calibration strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 830;
+  line-height: 1.2;
+}
+
+.bill-report-forecast-calibration p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 620;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .bill-report-document .is-good {
@@ -10022,6 +11164,23 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .bill-forecast-metrics,
+  .bill-forecast-category-strip,
+  .bill-data-quality-strip,
+  .bill-data-quality-issues,
+  .bill-forecast-range-grid,
+  .bill-forecast-scenario-grid,
+  .bill-forecast-review-board,
+  .bill-forecast-breakdown,
+  .bill-forecast-calibration-strip,
+  .bill-forecast-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .bill-forecast-stack {
+    grid-column: 1 / -1;
+  }
+
   .bill-action-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -10175,9 +11334,47 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .bill-forecast-hero,
+  .bill-forecast-metrics,
+  .bill-forecast-category-strip,
+  .bill-data-quality-strip,
+  .bill-data-quality-issues,
+  .bill-forecast-range-grid,
+  .bill-forecast-scenario-grid,
+  .bill-forecast-review-board,
+  .bill-forecast-breakdown,
+  .bill-forecast-calibration-strip,
+  .bill-forecast-grid,
+  .bill-forecast-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bill-forecast-sample-list article,
+  .bill-forecast-sample-list dl {
+    grid-template-columns: 1fr;
+  }
+
+  .bill-forecast-quality-note {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .bill-forecast-quality-note span {
+    white-space: normal;
+  }
+
+  .bill-forecast-stack {
+    grid-column: auto;
+  }
+
   .bill-report-document__cover,
   .bill-report-document__kpis,
   .bill-report-document__meta,
+  .bill-report-forecast-snapshot__quality,
+  .bill-report-forecast-snapshot__range,
+  .bill-report-forecast-snapshot__breakdown,
+  .bill-report-forecast-snapshot__scenarios,
   .bill-report-document__layout {
     grid-template-columns: 1fr;
   }

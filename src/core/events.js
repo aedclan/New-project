@@ -615,9 +615,227 @@ export function bindEvents(app, elements, renderer, formController, authControll
     dialog.showModal();
   }
 
+  function showBillForecastDetailDialog(target) {
+    const dialog = document.createElement("dialog");
+    dialog.className = "modal bill-forecast-detail-modal";
+    const title = target.dataset.forecastTitle || "预测详情";
+    const value = target.dataset.forecastValue || "";
+    const text = target.dataset.forecastText || "";
+    const basis = target.dataset.forecastBasis || "基于全库历史账单、近期趋势和已知未来压力计算。";
+    let samples = [];
+    try {
+      samples = JSON.parse(target.dataset.forecastSamples || "[]");
+    } catch {
+      samples = [];
+    }
+    dialog.innerHTML = `
+      <section class="modal-panel bill-forecast-detail-panel">
+        <div class="drawer-head">
+          <div>
+            <span class="eyebrow">FORECAST DETAIL</span>
+            <h2>${escapeHtml(title)}</h2>
+          </div>
+          <button class="icon-button" data-close-bill-forecast-detail type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="bill-forecast-detail-body">
+          <article class="bill-forecast-detail-hero">
+            <span>预测结果</span>
+            <strong>${escapeHtml(value)}</strong>
+            <p>${escapeHtml(text)}</p>
+          </article>
+          <div class="bill-forecast-detail-grid">
+            <article>
+              <span>判断依据</span>
+              <p>${escapeHtml(basis)}</p>
+            </article>
+            <article>
+              <span>使用口径</span>
+              <p>全库历史月均值作为基线，近 3 月趋势作为修正，未来计划和订阅作为已知压力。</p>
+            </article>
+          </div>
+          ${
+            samples.length
+              ? `<div class="bill-forecast-sample-list">
+                  <div class="bill-forecast-sample-list__head">
+                    <span>校准样本</span>
+                    <strong>最近 ${escapeHtml(String(samples.length))} 个月</strong>
+                  </div>
+                  ${samples.map((item) => `
+                    <article class="${item.used === false ? "is-excluded" : "is-used"}">
+                      <div>
+                        <strong>${escapeHtml(item.month || "未记录")}</strong>
+                        <span>${escapeHtml(item.used === false ? `已排除 · ${item.excludeReason || "样本异常"}` : `已采用 · ${item.cause || item.level || "已验证"}`)}</span>
+                      </div>
+                      <dl>
+                        <div><dt>预测结余</dt><dd>${formatReportCurrency(item.predictedBalance)}</dd></div>
+                        <div><dt>实际结余</dt><dd>${formatReportCurrency(item.actualBalance)}</dd></div>
+                        <div><dt>结余偏差</dt><dd class="${Number(item.balanceDelta || 0) < 0 ? "is-risk" : "is-good"}">${formatReportCurrency(item.balanceDelta)}</dd></div>
+                      </dl>
+                    </article>
+                  `).join("")}
+                </div>`
+              : ""
+          }
+        </div>
+      </section>
+    `;
+    const close = () => {
+      dialog.close();
+      dialog.remove();
+    };
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog || event.target.closest("[data-close-bill-forecast-detail]")) close();
+    });
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      close();
+    });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+  }
+
   function formatReportCurrency(value) {
     const amount = Number(value || 0);
     return `¥${amount.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`;
+  }
+
+  function isReportIncomeBill(item) {
+    return item?.type === "收入";
+  }
+
+  function isReportExpenseBill(item) {
+    return item?.type === "支出" || !isReportIncomeBill(item);
+  }
+
+  function getReportMonthActual(month) {
+    const bills = (app.store.getData().bills || [])
+      .filter((item) => String(item.date || "").startsWith(month))
+      .filter((item) => !item.excludeFromAnalysis && !item.analysisExcluded);
+    const income = bills.filter(isReportIncomeBill).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const expenseItems = bills.filter(isReportExpenseBill);
+    const expense = expenseItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const categoryTotals = Object.entries(
+      expenseItems.reduce((map, item) => {
+        const category = item.category || "未分类";
+        map[category] = (map[category] || 0) + Number(item.amount || 0);
+        return map;
+      }, {}),
+    )
+      .map(([category, amount]) => ({ category, amount }))
+      .sort((left, right) => right.amount - left.amount);
+    const unclassifiedCount = bills.filter((item) => !item.category || item.category === "未分类").length;
+    return { month, bills, income, expense, balance: income - expense, categoryTotals, unclassifiedCount };
+  }
+
+  function buildForecastCalibration(check, forecast) {
+    if (!check.hasActual) {
+      return {
+        title: "等待实际数据",
+        text: "目标月份还没有形成有效账单，暂不校准预测模型。",
+        action: "录入收入、支出和分类后，系统会自动复盘偏差来源。",
+      };
+    }
+    const topCategory = check.actual.categoryTotals[0];
+    const growingTrend = (forecast.categoryTrends || []).find((item) => item.trend === "增长" || item.trend === "up");
+    if (check.actual.unclassifiedCount > 0) {
+      return {
+        title: "分类不完整",
+        text: `${check.actual.unclassifiedCount} 条流水缺少分类，分类流向和风险判断会被稀释。`,
+        action: "先补齐未分类流水，再复盘预测是否仍然偏离。",
+      };
+    }
+    if (check.predicted.income > 0 && check.actual.income < check.predicted.income * 0.68) {
+      return {
+        title: "收入低于预测",
+        text: `实际收入比预测少 ${formatReportCurrency(Math.abs(check.delta.income))}，结余偏差主要来自收入端。`,
+        action: "确认工资、报销、副业等收入是否漏录；若不是漏录，下轮预测降低收入基线权重。",
+      };
+    }
+    if (check.actual.expense > check.predicted.expense * 1.22) {
+      return {
+        title: growingTrend ? "分类增长放大偏差" : "支出高于预测",
+        text: topCategory ? `最大流向是「${topCategory.category}」${formatReportCurrency(topCategory.amount)}，实际支出超出预测 ${formatReportCurrency(check.delta.expense)}。` : `实际支出超出预测 ${formatReportCurrency(check.delta.expense)}。`,
+        action: growingTrend ? `下轮提高「${growingTrend.category}」近期增长权重，并给该分类设置控制线。` : "检查是否有一次性大额支出或未来计划未提前录入。",
+      };
+    }
+    if (check.actual.expense < check.predicted.expense * 0.78) {
+      return {
+        title: "预测偏保守",
+        text: `实际支出比预测少 ${formatReportCurrency(Math.abs(check.delta.expense))}，模型可能高估了未来压力。`,
+        action: "检查计划支出是否延期、订阅是否取消；下轮适当降低已知压力修正权重。",
+      };
+    }
+    return {
+      title: "模型可沿用",
+      text: "预测与实际走势接近，长期基线和近期趋势的组合较稳定。",
+      action: "继续保持分类完整，月底复盘异常分类即可。",
+    };
+  }
+
+  function buildBillReportForecastCheck(report) {
+    const forecast = report?.forecast || {};
+    const month = forecast.nextMonth || forecast.nextMonthMonth || forecast.month || "";
+    if (!/^\d{4}-\d{2}$/.test(month)) return null;
+    const actual = getReportMonthActual(month);
+    const hasActual = actual.bills.length > 0 || actual.income > 0 || actual.expense > 0;
+    const predicted = {
+      income: Number(forecast.nextMonthIncome ?? forecast.income ?? 0),
+      expense: Number(forecast.nextMonthExpense ?? forecast.expense ?? 0),
+      balance: Number(forecast.nextMonthBalance ?? forecast.balance ?? 0),
+    };
+    const delta = {
+      income: actual.income - predicted.income,
+      expense: actual.expense - predicted.expense,
+      balance: actual.balance - predicted.balance,
+    };
+    const expenseBase = Math.max(Math.abs(predicted.expense), Math.abs(actual.expense), 1);
+    const balanceBase = Math.max(Math.abs(predicted.balance), Math.abs(actual.balance), 1);
+    const drift = Math.max(Math.abs(delta.expense) / expenseBase, Math.abs(delta.balance) / balanceBase);
+    const level = !hasActual ? "pending" : drift <= 0.18 ? "good" : drift <= 0.36 ? "watch" : "risk";
+    const label = level === "pending" ? "待验证" : level === "good" ? "偏差可控" : level === "watch" ? "需要校准" : "明显偏离";
+    const conclusion = !hasActual
+      ? `${month} 尚未形成有效账单，预测会在录入数据后自动复盘。`
+      : level === "good"
+        ? "预测与实际接近，当前基线可以继续沿用。"
+        : level === "watch"
+        ? "实际走势和预测存在差距，建议下次提高近期趋势和分类变化权重。"
+        : "实际走势明显偏离预测，需要检查异常支出、收入缺失或分类录入是否完整。";
+    const check = { month, hasActual, actual, predicted, delta, level, label, conclusion };
+    return { ...check, calibration: buildForecastCalibration(check, forecast) };
+  }
+
+  function renderBillReportForecastCheck(report) {
+    const check = buildBillReportForecastCheck(report);
+    if (!check) return "";
+    return `
+      <section class="bill-report-forecast-check bill-report-forecast-check--${escapeHtml(check.level)}">
+        <div class="bill-report-forecast-check__head">
+          <div>
+            <span>FORECAST REVIEW</span>
+            <h2>${escapeHtml(check.month)} 预测复盘</h2>
+          </div>
+          <strong>${escapeHtml(check.label)}</strong>
+        </div>
+        <div class="bill-report-forecast-check__grid">
+          <article><span>预测收入</span><strong>${formatReportCurrency(check.predicted.income)}</strong><small>实际 ${formatReportCurrency(check.actual.income)}</small></article>
+          <article><span>预测支出</span><strong>${formatReportCurrency(check.predicted.expense)}</strong><small>实际 ${formatReportCurrency(check.actual.expense)}</small></article>
+          <article><span>预测结余</span><strong>${formatReportCurrency(check.predicted.balance)}</strong><small>实际 ${formatReportCurrency(check.actual.balance)}</small></article>
+          <article><span>结余偏差</span><strong class="${check.level === "risk" ? "is-risk" : "is-good"}">${formatReportCurrency(check.delta.balance)}</strong><small>${escapeHtml(check.conclusion)}</small></article>
+        </div>
+        <div class="bill-report-forecast-calibration">
+          <article>
+            <span>偏差来源</span>
+            <strong>${escapeHtml(check.calibration.title)}</strong>
+            <p>${escapeHtml(check.calibration.text)}</p>
+          </article>
+          <article>
+            <span>校准动作</span>
+            <strong>下轮预测</strong>
+            <p>${escapeHtml(check.calibration.action)}</p>
+          </article>
+        </div>
+      </section>
+    `;
   }
 
   function getBillReportById(id) {
@@ -648,6 +866,55 @@ export function bindEvents(app, elements, renderer, formController, authControll
       <section class="bill-report-section-card">
         <h2>${escapeHtml(section.title)}</h2>
         <div class="markdown-preview">${renderMarkdown(section.body)}</div>
+      </section>
+    `;
+  }
+
+  function renderBillReportForecastSnapshot(report) {
+    const forecast = report?.forecast || {};
+    if (!forecast.nextMonth && !forecast.expenseBreakdown && !forecast.predictionRange) return "";
+    const range = forecast.predictionRange || {};
+    const breakdown = forecast.expenseBreakdown || {};
+    const scenarios = forecast.scenarios || [];
+    const rangeRows = [
+      ["收入区间", range.income ? `${formatReportCurrency(range.income.low)} - ${formatReportCurrency(range.income.high)}` : "暂无", range.income ? `中位 ${formatReportCurrency(range.income.mid)}` : "待生成"],
+      ["支出区间", range.expense ? `${formatReportCurrency(range.expense.low)} - ${formatReportCurrency(range.expense.high)}` : "暂无", range.expense ? `中位 ${formatReportCurrency(range.expense.mid)}` : "待生成"],
+      ["结余区间", range.balance ? `${formatReportCurrency(range.balance.low)} - ${formatReportCurrency(range.balance.high)}` : "暂无", range.riskLine ? `风险线 ${formatReportCurrency(range.riskLine)}` : "待生成"],
+    ];
+    const breakdownRows = [
+      ["固定", breakdown.fixed],
+      ["订阅", breakdown.subscription],
+      ["日常", breakdown.daily],
+      ["计划", breakdown.plan],
+      ["异常排除", breakdown.abnormalExcluded],
+    ];
+    return `
+      <section class="bill-report-forecast-snapshot">
+        <div class="bill-report-forecast-snapshot__head">
+          <div>
+            <span>FORECAST SNAPSHOT</span>
+            <h2>${escapeHtml(forecast.nextMonth || "下月")} 预测摘要</h2>
+          </div>
+          <strong>${escapeHtml(forecast.level || "预测")}</strong>
+        </div>
+        <div class="bill-report-forecast-snapshot__quality">
+          <article><span>数据质量</span><strong>${escapeHtml(report.qualityScore != null ? `${report.qualityScore} 分` : report.qualityStatus || "旧版")}</strong><small>可信度 ${escapeHtml(report.qualityConfidence || forecast.confidence || "-")}</small></article>
+          <article><span>下月预测</span><strong>${formatReportCurrency(forecast.nextMonthBalance)}</strong><small>收入 ${formatReportCurrency(forecast.nextMonthIncome)} · 支出 ${formatReportCurrency(forecast.nextMonthExpense)}</small></article>
+          <article><span>年度预测</span><strong>${formatReportCurrency(forecast.nextYearBalance)}</strong><small>${escapeHtml(forecast.nextYear || "年度")} 结余</small></article>
+        </div>
+        <div class="bill-report-forecast-snapshot__range">
+          ${rangeRows.map(([label, value, hint]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(hint)}</small></article>`).join("")}
+        </div>
+        <div class="bill-report-forecast-snapshot__breakdown">
+          ${breakdownRows.map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${formatReportCurrency(value)}</strong></article>`).join("")}
+        </div>
+        ${
+          scenarios.length
+            ? `<div class="bill-report-forecast-snapshot__scenarios">
+                ${scenarios.map((item) => `<article class="is-${escapeHtml(item.tone || "good")}"><span>${escapeHtml(item.label)}情景</span><strong>${formatReportCurrency(item.balance)}</strong><small>收入 ${formatReportCurrency(item.income)} · 支出 ${formatReportCurrency(item.expense)}</small></article>`).join("")}
+              </div>`
+            : ""
+        }
       </section>
     `;
   }
@@ -688,6 +955,8 @@ export function bindEvents(app, elements, renderer, formController, authControll
           <article><span>未来缺口</span><strong>${formatReportCurrency(report.futureGap)}</strong><small>未来 3 个月计划/续费</small></article>
           <article><span>行动完成</span><strong>${escapeHtml(String(report.actionDone ?? 0))}/${escapeHtml(String(report.actionTotal ?? 0))}</strong><small>本月行动清单</small></article>
         </section>
+        ${renderBillReportForecastSnapshot(report)}
+        ${renderBillReportForecastCheck(report)}
         <section class="bill-report-document__layout">
           <div class="bill-report-document__main">
             ${primarySections.map(renderBillReportSection).join("") || `<section class="bill-report-section-card"><h2>月报内容</h2><div class="markdown-preview">${renderMarkdown(note?.content || note?.description || "暂无月报内容")}</div></section>`}
@@ -729,6 +998,33 @@ export function bindEvents(app, elements, renderer, formController, authControll
             .bill-report-document__meta small { display: block; margin-top: 3px; color: #6a8077; font-size: 10.5px; }
             .is-good { color: #0f7a4d !important; }
             .is-risk { color: #d23b3b !important; }
+            .bill-report-forecast-snapshot { margin-top: 9px; border: 1px solid #dce8e1; border-radius: 10px; background: #fbfdfb; padding: 10px; break-inside: avoid; }
+            .bill-report-forecast-snapshot__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+            .bill-report-forecast-snapshot__head span, .bill-report-forecast-snapshot article span { color: #60776d; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+            .bill-report-forecast-snapshot__head h2 { margin: 2px 0 0; color: #17322a; font-size: 14px; line-height: 1.2; }
+            .bill-report-forecast-snapshot__head strong { border-radius: 999px; background: #eaf6ef; color: #0f7a4d; padding: 4px 8px; font-size: 11px; }
+            .bill-report-forecast-snapshot__quality, .bill-report-forecast-snapshot__range, .bill-report-forecast-snapshot__scenarios { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 8px; }
+            .bill-report-forecast-snapshot__breakdown { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; margin-top: 8px; }
+            .bill-report-forecast-snapshot article { border: 1px solid #e2ece6; border-radius: 9px; background: #fff; padding: 8px; }
+            .bill-report-forecast-snapshot article strong { display: block; margin-top: 3px; color: #18362d; font-size: 12.5px; line-height: 1.15; }
+            .bill-report-forecast-snapshot article small { display: block; margin-top: 3px; color: #6a8077; font-size: 9.8px; line-height: 1.35; }
+            .bill-report-forecast-check { margin-top: 9px; border: 1px solid #dce8e1; border-radius: 10px; background: #fbfdfb; padding: 10px; break-inside: avoid; }
+            .bill-report-forecast-check__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+            .bill-report-forecast-check__head span { color: #60776d; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+            .bill-report-forecast-check__head h2 { margin: 2px 0 0; color: #17322a; font-size: 14px; line-height: 1.2; }
+            .bill-report-forecast-check__head strong { border-radius: 999px; background: #eaf6ef; color: #0f7a4d; padding: 4px 8px; font-size: 11px; }
+            .bill-report-forecast-check--risk .bill-report-forecast-check__head strong { background: #fdeeee; color: #d23b3b; }
+            .bill-report-forecast-check--watch .bill-report-forecast-check__head strong { background: #fff7df; color: #95680f; }
+            .bill-report-forecast-check__grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 8px; }
+            .bill-report-forecast-check__grid article { border: 1px solid #e2ece6; border-radius: 9px; background: #fff; padding: 8px; }
+            .bill-report-forecast-check__grid span { color: #60776d; font-size: 10px; font-weight: 800; }
+            .bill-report-forecast-check__grid strong { display: block; margin-top: 3px; color: #18362d; font-size: 13px; line-height: 1.15; }
+            .bill-report-forecast-check__grid small { display: block; margin-top: 3px; color: #6a8077; font-size: 9.8px; line-height: 1.35; }
+            .bill-report-forecast-calibration { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; margin-top: 8px; }
+            .bill-report-forecast-calibration article { border: 1px solid #dfeae3; border-radius: 9px; background: #fff; padding: 8px; }
+            .bill-report-forecast-calibration span { color: #60776d; font-size: 10px; font-weight: 800; }
+            .bill-report-forecast-calibration strong { display: block; margin-top: 3px; color: #18362d; font-size: 12.5px; line-height: 1.15; }
+            .bill-report-forecast-calibration p { margin: 3px 0 0; color: #536b61; font-size: 9.8px; line-height: 1.35; }
             .bill-report-document__layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, .85fr); gap: 9px; margin-top: 10px; align-items: start; }
             .bill-report-document__main, .bill-report-document__side { display: grid; gap: 8px; }
             .bill-report-section-card h2 { margin: 0 0 7px; border-bottom: 1px solid #e2ece6; padding-bottom: 5px; color: #15372e; font-size: 13px; }
@@ -809,6 +1105,12 @@ export function bindEvents(app, elements, renderer, formController, authControll
     if (billActionDetailTarget && !event.target.closest?.("button")) {
       event.preventDefault();
       showBillActionDetailDialog(billActionDetailTarget);
+      return;
+    }
+    const billForecastDetailTarget = event.target.closest?.("[data-bill-forecast-detail]");
+    if (billForecastDetailTarget && !event.target.closest?.("button")) {
+      event.preventDefault();
+      showBillForecastDetailDialog(billForecastDetailTarget);
       return;
     }
     if (billReportTarget && !event.target.closest?.("button")) {
@@ -1566,6 +1868,13 @@ export function bindEvents(app, elements, renderer, formController, authControll
     if (billActionDetailTarget && !event.target.closest("button")) {
       event.preventDefault();
       showBillActionDetailDialog(billActionDetailTarget);
+      return;
+    }
+
+    const billForecastDetailTarget = event.target.closest("[data-bill-forecast-detail]");
+    if (billForecastDetailTarget && !event.target.closest("button")) {
+      event.preventDefault();
+      showBillForecastDetailDialog(billForecastDetailTarget);
       return;
     }
 
