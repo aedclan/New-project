@@ -49,6 +49,92 @@ function isBillExcludedFromAnalysis(bill) {
   return Boolean(bill.excludeFromAnalysis || bill.analysisExcluded);
 }
 
+function getRelativeMonthKey(month, offset) {
+  const match = String(month || "").match(/^(\d{4})-(\d{2})$/);
+  const base = match ? new Date(Number(match[1]), Number(match[2]) - 1 + offset, 1) : new Date();
+  return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function summarizeBillsForMonth(data, month) {
+  const analysisBills = (data.bills || []).filter((item) => String(item.date || "").startsWith(month) && !isBillExcludedFromAnalysis(item));
+  const income = analysisBills.filter((item) => item.type === "收入").reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const expenseItems = analysisBills.filter((item) => item.type !== "收入");
+  const expense = expenseItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const categoryTotals = Object.entries(
+    expenseItems.reduce((map, item) => {
+      const category = item.category || "未分类";
+      map[category] = (map[category] || 0) + Number(item.amount || 0);
+      return map;
+    }, {}),
+  )
+    .map(([category, amount]) => ({ category, amount }))
+    .sort((left, right) => right.amount - left.amount);
+  return { month, income, expense, balance: income - expense, expenseItems, categoryTotals };
+}
+
+function formatMonthlyDelta(label, current, previous) {
+  const delta = Number(current || 0) - Number(previous || 0);
+  const direction = delta > 0 ? "增加" : delta < 0 ? "减少" : "持平";
+  return `- ${label}：本月 ¥${Number(current || 0).toFixed(2)} / 上月 ¥${Number(previous || 0).toFixed(2)}，${direction} ¥${Math.abs(delta).toFixed(2)}`;
+}
+
+function buildMonthlyComparisonReport(currentSummary, previousSummary) {
+  const currentCategories = currentSummary.categoryTotals || [];
+  const previousCategories = previousSummary.categoryTotals || [];
+  const names = [...new Set([...currentCategories.map((item) => item.category), ...previousCategories.map((item) => item.category)])];
+  const biggestCategoryChange = names
+    .map((category) => {
+      const current = currentCategories.find((item) => item.category === category)?.amount || 0;
+      const previous = previousCategories.find((item) => item.category === category)?.amount || 0;
+      return { category, current, previous, delta: current - previous };
+    })
+    .sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta))[0];
+  return [
+    formatMonthlyDelta("收入变化", currentSummary.income, previousSummary.income),
+    formatMonthlyDelta("支出变化", currentSummary.expense, previousSummary.expense),
+    formatMonthlyDelta("结余变化", currentSummary.balance, previousSummary.balance),
+    biggestCategoryChange
+      ? `- 最大变化分类：${biggestCategoryChange.category}，本月 ¥${biggestCategoryChange.current.toFixed(2)} / 上月 ¥${biggestCategoryChange.previous.toFixed(2)}，变化 ¥${biggestCategoryChange.delta.toFixed(2)}。`
+      : "- 最大变化分类：暂无可对比分类。",
+  ].join("\n");
+}
+
+function buildLongTermFinanceReport(data, targetMonth) {
+  const budgets = data.budgets || {};
+  const totalBudget = Number(budgets.totalBudget || 0);
+  const categoryBudgets = new Map((budgets.categoryBudgets || []).map((item) => [item.category, Number(item.amount || 0)]));
+  const monthRows = Array.from({ length: 6 }, (_, index) => summarizeBillsForMonth(data, getRelativeMonthKey(targetMonth, index - 5)));
+  const categoryOverruns = new Map();
+  const categoryFrequency = new Map();
+  const riskFrequency = new Map();
+
+  monthRows.forEach((row) => {
+    row.categoryTotals.forEach((item) => {
+      categoryFrequency.set(item.category, (categoryFrequency.get(item.category) || 0) + 1);
+      const limit = categoryBudgets.get(item.category);
+      if (limit > 0 && item.amount > limit) categoryOverruns.set(item.category, (categoryOverruns.get(item.category) || 0) + 1);
+    });
+    if (row.income <= 0 && row.expense > 0) riskFrequency.set("缺少收入", (riskFrequency.get("缺少收入") || 0) + 1);
+    if (row.balance < 0) riskFrequency.set("现金流为负", (riskFrequency.get("现金流为负") || 0) + 1);
+    if (row.income > 0 && row.expense / row.income >= 0.9) riskFrequency.set("支出率过高", (riskFrequency.get("支出率过高") || 0) + 1);
+    if (totalBudget > 0 && row.expense / totalBudget >= 0.8) riskFrequency.set("预算超前", (riskFrequency.get("预算超前") || 0) + 1);
+  });
+
+  const topOverrun = [...categoryOverruns.entries()].sort((left, right) => right[1] - left[1])[0];
+  const topFrequentCategory = [...categoryFrequency.entries()].sort((left, right) => right[1] - left[1])[0];
+  const topRisk = [...riskFrequency.entries()].sort((left, right) => right[1] - left[1])[0];
+  const averageExpense = monthRows.reduce((sum, row) => sum + row.expense, 0) / Math.max(monthRows.length, 1);
+  return [
+    topOverrun
+      ? `- 近 6 个月最常超支分类：${topOverrun[0]}，出现 ${topOverrun[1]} 次。`
+      : topFrequentCategory
+        ? `- 近 6 个月最常出现支出分类：${topFrequentCategory[0]}，出现 ${topFrequentCategory[1]} 个月。`
+        : "- 近 6 个月暂无稳定分类样本。",
+    topRisk ? `- 近 6 个月最常出现风险：${topRisk[0]}，出现 ${topRisk[1]} 次。` : "- 近 6 个月未形成高频风险。",
+    `- 近 6 个月月均支出：¥${averageExpense.toFixed(2)}。`,
+  ].join("\n");
+}
+
 function scoreByRate(rate, ranges) {
   const currentRate = Number(rate || 0);
   return ranges.find((item) => currentRate <= item.max)?.score ?? ranges[ranges.length - 1]?.score ?? 60;
@@ -114,6 +200,44 @@ function buildMonthlyFinanceActions({ income, expense, expenseItems, health }) {
   ].filter(Boolean);
 }
 
+function formatBillActionStatusForReview(statusMap = {}, statusMetaMap = {}) {
+  const entries = Object.entries(statusMap)
+    .map(([id, status]) => {
+      const meta = statusMetaMap[id] || {};
+      return {
+        title: String(id || "")
+        .replace(/^carry-\d{4}-\d{2}-/, "")
+        .replace(/-/g, " ")
+        .replace(/\s+/g, " ")
+        .trim() || "未命名行动",
+        status: ["待处理", "进行中", "已完成"].includes(status) ? status : "待处理",
+        updatedAt: String(meta.completedAt || meta.updatedAt || "").slice(0, 10),
+      };
+    })
+    .filter((item) => item.title);
+
+  if (!entries.length) {
+    return {
+      summary: "- 行动状态：本月行动清单尚未标记执行状态。",
+      detail: "- 暂无已标记行动。",
+    };
+  }
+
+  const doneCount = entries.filter((item) => item.status === "已完成").length;
+  const doingCount = entries.filter((item) => item.status === "进行中").length;
+  const todoCount = entries.length - doneCount - doingCount;
+  const statusWeight = { 已完成: 0, 进行中: 1, 待处理: 2 };
+  const detail = entries
+    .sort((left, right) => statusWeight[left.status] - statusWeight[right.status] || left.title.localeCompare(right.title, "zh-CN"))
+    .map((item) => `- [${item.status}] ${item.title}${item.updatedAt ? `（${item.updatedAt}）` : ""}`)
+    .join("\n");
+
+  return {
+    summary: `- 行动状态：${doneCount}/${entries.length} 已完成，${doingCount} 项进行中，${todoCount} 项待处理。`,
+    detail,
+  };
+}
+
 function normalizeBillRuleText(value) {
   return String(value || "")
     .replace(/\s+/g, "")
@@ -148,6 +272,11 @@ function normalizeLegacyData(data) {
   data.billClassificationRules = [];
   data.billNonConsumptionRules = [];
   data.billImportReports = data.billImportReports || [];
+  data.budgets = {
+    ...(data.budgets || {}),
+    billActionStatuses: (data.budgets || {}).billActionStatuses || {},
+    billActionStatusMeta: (data.budgets || {}).billActionStatusMeta || {},
+  };
   data.bills = data.bills || [];
 
   const contactIdMap = new Map();
@@ -742,6 +871,8 @@ export function createStore() {
           month,
           totalBudget: 0,
           categoryBudgets: [],
+          billActionStatuses: {},
+          billActionStatusMeta: {},
           subscriptionMonthlyBudget: 0,
           subscriptionAnnualBudget: 0,
           subscriptionCategoryBudgets: [],
@@ -943,41 +1074,177 @@ export function createStore() {
       const bills = (data.bills || []).filter((item) => String(item.date || "").startsWith(targetMonth));
       const analysisBills = bills.filter((item) => !isBillExcludedFromAnalysis(item));
       const excludedBills = bills.filter((item) => isBillExcludedFromAnalysis(item));
+      const currentSummary = summarizeBillsForMonth(data, targetMonth);
+      const previousSummary = summarizeBillsForMonth(data, getRelativeMonthKey(targetMonth, -1));
       const income = analysisBills.filter((item) => item.type === "收入").reduce((sum, item) => sum + Number(item.amount || 0), 0);
       const expenseItems = analysisBills.filter((item) => item.type !== "收入");
       const expense = expenseItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
       const balance = income - expense;
       const categoryMap = expenseItems.reduce((map, item) => {
         const category = item.category || "未分类";
-        map[category] = (map[category] || 0) + Number(item.amount || 0);
+        map[category] = map[category] || { amount: 0, count: 0, samples: [] };
+        map[category].amount += Number(item.amount || 0);
+        map[category].count += 1;
+        map[category].samples.push(item);
         return map;
       }, {});
-      const topCategories = Object.entries(categoryMap).sort((left, right) => right[1] - left[1]).slice(0, 5);
+      const topCategories = Object.entries(categoryMap)
+        .map(([category, value]) => ({ category, ...value }))
+        .sort((left, right) => right.amount - left.amount)
+        .slice(0, 6);
       const health = calculateMonthlyFinanceHealth({ income, expense, expenseItems, contextBills: data.bills || [] });
       const fixedExpense = health.fixedExpense;
+      const budgets = data.budgets || {};
+      const totalBudget = Number(budgets.totalBudget || 0);
+      const daysInMonth = (() => {
+        const [year, monthValue] = targetMonth.split("-").map(Number);
+        return year && monthValue ? new Date(year, monthValue, 0).getDate() : 30;
+      })();
+      const currentDate = new Date();
+      const isCurrentMonth = today.startsWith(targetMonth);
+      const elapsedDay = isCurrentMonth ? currentDate.getDate() : daysInMonth;
+      const elapsedRate = daysInMonth ? Math.round((elapsedDay / daysInMonth) * 100) : 100;
+      const budgetUsedRate = totalBudget > 0 ? Math.round((expense / totalBudget) * 100) : 0;
+      const remainingBudget = Math.max(totalBudget - expense, 0);
+      const daysLeft = Math.max(daysInMonth - elapsedDay + 1, 1);
+      const dailyBudget = remainingBudget / daysLeft;
+      const paceGap = budgetUsedRate - elapsedRate;
+      const paceLabel = totalBudget <= 0 ? "未设置预算" : paceGap > 10 ? "超前消耗" : paceGap < -10 ? "节奏宽松" : "节奏正常";
+      const categoryBudgetRows = (budgets.categoryBudgets || [])
+        .map((budget) => {
+          const used = topCategories.find((item) => item.category === budget.category)?.amount || 0;
+          const amount = Number(budget.amount || 0);
+          const percent = amount > 0 ? Math.round((used / amount) * 100) : 0;
+          const level = percent >= 100 ? "超出" : percent >= 80 ? "接近" : "可控";
+          return `- ${budget.category}：已用 ¥${used.toFixed(2)} / 预算 ¥${amount.toFixed(2)}，${level}（${percent}%）`;
+        })
+        .join("\n") || "- 未设置分类预算，无法判断各分类上限。";
+      const riskLines = [
+        income <= 0 && expense > 0 ? "- 高风险：本月已有支出，但缺少收入参照。" : "",
+        income > 0 && expense / income >= 0.9 ? `- 高风险：支出率 ${Math.round((expense / income) * 100)}%，现金流安全边际偏低。` : "",
+        income > 0 && health.repayment / income >= 0.35 ? `- 高风险：还款支出占收入 ${Math.round((health.repayment / income) * 100)}%，需检查房贷/信用卡/分期。` : "",
+        income > 0 && fixedExpense / income >= 0.4 ? `- 关注：固定支出占收入 ${Math.round((fixedExpense / income) * 100)}%，下月可支配空间被压缩。` : "",
+        totalBudget > 0 && expense / totalBudget >= 0.8 ? `- 关注：预算已使用 ${budgetUsedRate}%，${paceLabel}。` : "",
+      ].filter(Boolean);
+      const futureStart = `${targetMonth}-01`;
+      const [targetYear, targetMonthNumber] = targetMonth.split("-").map(Number);
+      const futureEndDate = targetYear && targetMonthNumber ? new Date(targetYear, targetMonthNumber + 3, 0) : new Date();
+      const futureEnd = futureEndDate.toISOString().slice(0, 10);
+      const futurePlans = (budgets.futurePlans || [])
+        .filter((item) => item.status !== "取消")
+        .filter((item) => {
+          const key = String(item.date || "").slice(0, 10);
+          return key >= futureStart && key <= futureEnd;
+        })
+        .map((item) => ({ ...item, sourceLabel: "计划" }));
+      const subscriptionPlans = (data.subscriptions || [])
+        .filter((item) => {
+          const key = String(item.nextRenewalDate || "").slice(0, 10);
+          return key >= futureStart && key <= futureEnd;
+        })
+        .map((item) => ({
+          title: item.name || "订阅续费",
+          amount: Number(item.monthlyCost || item.amount || 0),
+          date: item.nextRenewalDate,
+          priority: item.autoRenew ? "高" : "中",
+          fundingSource: item.paymentMethod || "家庭账户",
+          sourceLabel: "订阅",
+        }));
+      const futureItems = [...futurePlans, ...subscriptionPlans].sort((left, right) => String(left.date || "").localeCompare(String(right.date || "")));
+      const futureTotal = futureItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const futureGap = Math.max(futureTotal - Math.max(balance, 0), 0);
+      const futureLine = futureItems.slice(0, 8).map((item) => {
+        const gap = Math.max(Number(item.amount || 0) - Math.max(balance, 0), 0);
+        const status = gap > 0 ? `缺口 ¥${gap.toFixed(2)}` : "可覆盖";
+        return `- ${item.date || "未定日期"} ${item.title || "未命名计划"}：¥${Number(item.amount || 0).toFixed(2)}，${item.priority || "中"}优先级，${item.sourceLabel}，${status}`;
+      }).join("\n") || "- 未来 3 个月暂无已登记计划或订阅续费。";
       const abnormalLine = expenseItems
         .slice()
         .sort((left, right) => Number(right.amount || 0) - Number(left.amount || 0))
         .slice(0, 3)
         .map((item) => `- ${item.date || "未设置日期"} ${item.title || item.category || "支出"}：¥${Number(item.amount || 0).toFixed(2)}`)
         .join("\n") || "- 暂无支出记录";
-      const categoryLine = topCategories.map(([category, amount]) => `- ${category}：¥${Number(amount || 0).toFixed(2)}`).join("\n") || "- 暂无分类支出";
+      const categoryLine = topCategories.map((row) => {
+        const percent = expense > 0 ? Math.round((row.amount / expense) * 100) : 0;
+        const largest = row.samples.slice().sort((left, right) => Number(right.amount || 0) - Number(left.amount || 0))[0];
+        const sample = largest ? `，代表流水：${largest.title || largest.note || largest.source || "未命名"} ¥${Number(largest.amount || 0).toFixed(2)}` : "";
+        return `- ${row.category}：¥${Number(row.amount || 0).toFixed(2)}，${row.count} 笔，占支出 ${percent}%${sample}`;
+      }).join("\n") || "- 暂无分类支出";
       const actionLine = buildMonthlyFinanceActions({ income, expense, expenseItems, health }).join("\n") || "- 暂无必须处理的问题，继续观察趋势。";
+      const actionStatus = formatBillActionStatusForReview(
+        (budgets.billActionStatuses || {})[targetMonth] || {},
+        (budgets.billActionStatusMeta || {})[targetMonth] || {},
+      );
       const componentLine = health.components.map((item) => `- ${item.label}：${item.score} 分，权重 ${item.weight}%，${item.hint}`).join("\n");
       const weakLine = health.weakItems.map((item) => `- ${item.label}：${item.score} 分，${item.hint}`).join("\n") || "- 暂无明显短板";
-      const healthText = income <= 0 ? "缺少收入数据，健康判断会偏保守。" : balance < 0 ? "本月现金流为负，需要优先复核大额支出与固定成本。" : health.score < 70 ? "本月财务健康分偏低，建议优先处理薄弱项。" : "本月现金流为正，整体较稳定。";
-      const title = `${targetMonth} 生活收支复盘`;
+      const riskText = riskLines.join("\n") || "- 未触发明显风险规则，保持分类、预算和未来计划录入。";
+      const comparisonLine = buildMonthlyComparisonReport(currentSummary, previousSummary);
+      const longTermLine = buildLongTermFinanceReport(data, targetMonth);
+      const qualityIssues = [
+        income <= 0 && expense > 0 ? `缺少收入：本月已有支出 ¥${expense.toFixed(2)}，但没有收入参照。` : "",
+        expenseItems.filter((item) => !item.category || item.category === "未分类").length
+          ? `未分类流水：${expenseItems.filter((item) => !item.category || item.category === "未分类").length} 笔。`
+          : "",
+        expenseItems.filter((item) => !item.payer || item.payer === "未指定").length
+          ? `缺少承担人：${expenseItems.filter((item) => !item.payer || item.payer === "未指定").length} 笔。`
+          : "",
+        excludedBills.length ? `不计入分析流水：${excludedBills.length} 笔，可能影响月报完整性。` : "",
+      ].filter(Boolean);
+      const qualityStatus = qualityIssues.length >= 3 ? "需复核" : qualityIssues.length ? "需补录" : "完整";
+      const qualityLine = qualityIssues.length
+        ? qualityIssues.map((item) => `- ${item}`).join("\n")
+        : "- 数据完整度良好，可作为本月判断依据。";
+      const budgetLine = [
+        totalBudget > 0 ? `- 总预算：¥${totalBudget.toFixed(2)}，已用 ¥${expense.toFixed(2)}，剩余 ¥${remainingBudget.toFixed(2)}。` : "- 未设置总预算。",
+        totalBudget > 0 ? `- 预算节奏：时间进度 ${elapsedRate}%，预算使用 ${budgetUsedRate}%，判断为「${paceLabel}」。` : "- 无法计算预算节奏。",
+        totalBudget > 0 ? `- 剩余日均可用：约 ¥${dailyBudget.toFixed(2)} / 天，剩余 ${daysLeft} 天。` : "- 建议先设置总预算和分类预算。",
+        categoryBudgetRows,
+      ].join("\n");
+      const healthText =
+        income <= 0
+          ? "缺少收入数据，健康判断会偏保守。"
+          : balance < 0
+            ? "本月现金流为负，需要优先复核大额支出、固定成本和未来计划。"
+            : futureGap > 0
+              ? `本月现金流为正，但未来 3 个月仍有 ¥${futureGap.toFixed(2)} 资金缺口。`
+              : health.score < 70
+                ? "本月财务健康分偏低，建议优先处理薄弱项。"
+                : "本月现金流为正，预算和未来计划整体可控。";
+      const title = `${targetMonth} 生活收支月报`;
+      const legacyTitle = `${targetMonth} 生活收支复盘`;
       const content = [
         `# ${title}`,
         "",
-        "## 核心数据",
+        "## 核心摘要",
         `- 收入：¥${income.toFixed(2)}`,
         `- 支出：¥${expense.toFixed(2)}`,
         `- 结余：¥${balance.toFixed(2)}`,
         `- 固定支出：¥${fixedExpense.toFixed(2)}`,
         `- 还款支出：¥${health.repayment.toFixed(2)}`,
+        `- 未来 3 个月计划/续费：¥${futureTotal.toFixed(2)}，资金缺口：¥${futureGap.toFixed(2)}`,
         `- 不计入分析流水：${excludedBills.length} 笔，¥${excludedBills.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2)}`,
         `- 健康评分：${health.score} 分`,
+        "",
+        "## 风险提醒",
+        riskText,
+        "",
+        "## 月度对比",
+        comparisonLine,
+        "",
+        "## 长期问题统计",
+        longTermLine,
+        "",
+        "## 数据质量检查",
+        qualityLine,
+        "",
+        "## 预算节奏",
+        budgetLine,
+        "",
+        "## 未来计划",
+        futureLine,
+        "",
+        "## 分类流向",
+        categoryLine,
         "",
         "## 健康评分拆解",
         componentLine,
@@ -988,19 +1255,44 @@ export function createStore() {
         "## 行动清单",
         actionLine,
         "",
-        "## 支出结构",
-        categoryLine,
+        "## 行动执行",
+        actionStatus.summary,
+        actionStatus.detail,
         "",
         "## 大额支出",
         abnormalLine,
         "",
-        "## 复盘判断",
+        "## 月报结论",
         healthText,
       ].join("\n");
-      const existing = (data.notes || []).find((item) => item.title === title && item.noteType === "summary");
+      const actionStatusMap = (budgets.billActionStatuses || {})[targetMonth] || {};
+      const actionTotal = Object.keys(actionStatusMap).length;
+      const actionDone = Object.values(actionStatusMap).filter((status) => status === "已完成").length;
+      const billReportSummary = {
+        month: targetMonth,
+        income,
+        expense,
+        balance,
+        healthScore: health.score,
+        riskCount: riskLines.length,
+        budgetUsedRate,
+        topCategory: topCategories[0]?.category || "",
+        topCategoryAmount: Number(topCategories[0]?.amount || 0),
+        actionDone,
+        actionTotal,
+        futureGap,
+        qualityStatus,
+        qualityIssues,
+        updatedAt: today,
+      };
+      const existing = (data.notes || []).find((item) => item.noteType === "summary" && (item.title === title || item.title === legacyTitle || item.billReportMonth === targetMonth));
       if (existing) {
+        existing.title = title;
         existing.content = content;
         existing.description = healthText;
+        existing.billReportMonth = targetMonth;
+        existing.billReportSummary = billReportSummary;
+        existing.tags = [...new Set([...(existing.tags || []), "月度复盘", "月报", "生活收支", targetMonth])];
         existing.updatedAt = today;
         save();
         return existing.id;
@@ -1014,7 +1306,9 @@ export function createStore() {
         content,
         sourceUrl: "",
         projectId: "",
-        tags: ["月度复盘", "生活收支", targetMonth],
+        tags: ["月度复盘", "月报", "生活收支", targetMonth],
+        billReportMonth: targetMonth,
+        billReportSummary,
         isFavorite: false,
         pinned: false,
         createdAt: today,
@@ -1067,6 +1361,40 @@ export function createStore() {
         categoryBudgets: parseCategoryBudgets(payload.categoryBudgets),
       };
 
+      save();
+      return true;
+    },
+    updateBillActionStatus(month, actionId, status = "待处理") {
+      const monthKey = String(month || "").trim();
+      const id = String(actionId || "").trim();
+      const nextStatus = ["待处理", "进行中", "已完成"].includes(status) ? status : "待处理";
+      if (!monthKey || !id) return false;
+      const today = new Date().toISOString().slice(0, 10);
+      const statuses = {
+        ...((data.budgets || {}).billActionStatuses || {}),
+        [monthKey]: {
+          ...(((data.budgets || {}).billActionStatuses || {})[monthKey] || {}),
+          [id]: nextStatus,
+        },
+      };
+      const currentMeta = (((data.budgets || {}).billActionStatusMeta || {})[monthKey] || {})[id] || {};
+      const statusMeta = {
+        ...((data.budgets || {}).billActionStatusMeta || {}),
+        [monthKey]: {
+          ...(((data.budgets || {}).billActionStatusMeta || {})[monthKey] || {}),
+          [id]: {
+            ...currentMeta,
+            status: nextStatus,
+            updatedAt: today,
+            completedAt: nextStatus === "已完成" ? today : "",
+          },
+        },
+      };
+      data.budgets = {
+        ...(data.budgets || {}),
+        billActionStatuses: statuses,
+        billActionStatusMeta: statusMeta,
+      };
       save();
       return true;
     },

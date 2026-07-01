@@ -25,6 +25,7 @@ import {
   verifyServerUserEmail,
 } from "./server-auth.js";
 import { applyAuthCoverImage, resetAuthCoverImage, saveAuthCoverImage } from "./auth-cover.js";
+import { renderMarkdown } from "./utils.js";
 
 function createDefaultFilters() {
   return {
@@ -244,8 +245,136 @@ export function bindEvents(app, elements, renderer, formController, authControll
   }
 
   function closeTransientOverlays() {
-    if (elements.modal?.open) formController.close();
+    if (elements.modal?.open) closeEntryModal();
     renderer.closeDrawer();
+  }
+
+  let billLedgerReturnMonth = "";
+
+  function getActiveBillLedgerMonth(modal = document.querySelector("#billLedgerModal")) {
+    return modal?.querySelector("[data-bill-ledger-month].is-active")?.dataset.billLedgerMonth || app.ui.filters.billMonth || "";
+  }
+
+  function reopenBillLedgerPanel() {
+    if (!billLedgerReturnMonth) return false;
+    const month = billLedgerReturnMonth;
+    billLedgerReturnMonth = "";
+    if (month) app.ui.filters.billMonth = month;
+    requestAnimationFrame(() => {
+      document.querySelector("#billLedgerModal")?.showModal();
+    });
+    return true;
+  }
+
+  function closeEntryModal() {
+    formController.close();
+    reopenBillLedgerPanel();
+  }
+
+  const billTrendScopes = ["year", "month", "week", "day"];
+
+  function getDefaultBillTrendZoomForScope(scope) {
+    if (scope !== "day") return { start: 0, end: 100 };
+    const month = app.ui.filters.billMonth || new Date().toISOString().slice(0, 7);
+    const [year, monthIndex] = String(month).split("-").map(Number);
+    const daysInMonth = year && monthIndex ? new Date(year, monthIndex, 0).getDate() : 30;
+    const today = new Date();
+    const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+    const activeDay = currentMonth === month ? today.getDate() : Math.ceil(daysInMonth / 2);
+    const span = Math.min(34, Math.max(18, (8 / Math.max(daysInMonth, 1)) * 100));
+    const center = ((Math.min(Math.max(activeDay, 1), daysInMonth) - 0.5) / daysInMonth) * 100;
+    const start = Math.min(Math.max(center - span / 2, 0), 100 - span);
+    return { start, end: start + span };
+  }
+
+  function setBillTrendScope(nextScope, zoomWindow = null) {
+    const normalizedScope = billTrendScopes.includes(nextScope) ? nextScope : "month";
+    const zoom = zoomWindow || getDefaultBillTrendZoomForScope(normalizedScope);
+    app.ui.filters.billTrendScope = normalizedScope;
+    app.ui.filters.billTrendRange = normalizedScope === "year" ? 5 : 6;
+    app.ui.filters.billTrendZoomStart = zoom.start;
+    app.ui.filters.billTrendZoomEnd = zoom.end;
+    delete app.ui.filters.billTrendHiddenSeries;
+    persistUiState(app.ui);
+    renderer.render();
+  }
+
+  function normalizeBillTrendZoomWindow(start, end) {
+    const normalizedStart = Math.min(Math.max(Number(start) || 0, 0), 96);
+    const normalizedEnd = Math.min(Math.max(Number(end) || 100, normalizedStart + 4), 100);
+    return { start: normalizedStart, end: normalizedEnd };
+  }
+
+  function setBillTrendZoomWindow(start, end, options = {}) {
+    const { persist = true, render = true } = options;
+    const normalized = normalizeBillTrendZoomWindow(start, end);
+    const normalizedStart = normalized.start;
+    const normalizedEnd = normalized.end;
+    const previousStart = Number(app.ui.filters.billTrendZoomStart ?? 0);
+    const previousEnd = Number(app.ui.filters.billTrendZoomEnd ?? 100);
+    if (Math.abs(previousStart - normalizedStart) < 0.01 && Math.abs(previousEnd - normalizedEnd) < 0.01) return;
+    app.ui.filters.billTrendZoomStart = normalizedStart;
+    app.ui.filters.billTrendZoomEnd = normalizedEnd;
+    if (persist) persistUiState(app.ui);
+    if (render) renderer.render();
+  }
+
+  function resetBillTrendZoom() {
+    app.ui.filters.billTrendZoomStart = 0;
+    app.ui.filters.billTrendZoomEnd = 100;
+    persistUiState(app.ui);
+    renderer.render();
+  }
+
+  let billTrendWheelFrame = 0;
+  let billTrendWheelPayload = null;
+  let billTrendWheelDelta = 0;
+
+  function zoomBillTrendFromWheel(event, chart) {
+    const currentStart = Number(app.ui.filters.billTrendZoomStart ?? 0);
+    const currentEnd = Number(app.ui.filters.billTrendZoomEnd ?? 100);
+    const currentSpan = Math.max(currentEnd - currentStart, 4);
+    const rect = chart.getBoundingClientRect();
+    const pointerRatio = rect.width > 0 ? Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1) : 0.5;
+    const zoomingIn = event.deltaY < 0;
+    const wheelStrength = Math.min(Math.abs(event.deltaY), 180);
+    const zoomFactor = Math.exp((zoomingIn ? -1 : 1) * wheelStrength * 0.0022);
+    const nextSpan = Math.min(Math.max(currentSpan * zoomFactor, 4), 100);
+    const center = currentStart + currentSpan * pointerRatio;
+    const nextStart = Math.min(Math.max(center - nextSpan * pointerRatio, 0), 100 - nextSpan);
+    const nextEnd = nextStart + nextSpan;
+    const currentScope = app.ui.filters.billTrendScope || "month";
+    const currentIndex = Math.max(0, billTrendScopes.indexOf(currentScope));
+
+    if (zoomingIn && currentSpan <= 10 && currentIndex < billTrendScopes.length - 1) {
+      const nextScope = billTrendScopes[currentIndex + 1];
+      const nextZoom = nextScope === "day" ? getDefaultBillTrendZoomForScope(nextScope) : { start: nextStart, end: nextEnd };
+      setBillTrendScope(nextScope, nextZoom);
+      return;
+    }
+    if (!zoomingIn && currentSpan >= 99 && currentIndex > 0) {
+      setBillTrendScope(billTrendScopes[currentIndex - 1]);
+      return;
+    }
+    setBillTrendZoomWindow(nextStart, nextEnd);
+  }
+
+  function scheduleBillTrendWheelZoom(event, chart) {
+    billTrendWheelDelta += event.deltaY;
+    billTrendWheelPayload = {
+      clientX: event.clientX,
+      deltaY: billTrendWheelDelta,
+      chart,
+    };
+    if (billTrendWheelFrame) return;
+    billTrendWheelFrame = requestAnimationFrame(() => {
+      const payload = billTrendWheelPayload;
+      billTrendWheelFrame = 0;
+      billTrendWheelPayload = null;
+      billTrendWheelDelta = 0;
+      if (!payload?.chart?.isConnected) return;
+      zoomBillTrendFromWheel(payload, payload.chart);
+    });
   }
 
   const billTrendTooltip = document.createElement("div");
@@ -256,6 +385,12 @@ export function bindEvents(app, elements, renderer, formController, authControll
   function hideBillTrendTooltip() {
     billTrendTooltip.hidden = true;
     billTrendTooltip.classList.remove("is-visible");
+    document.querySelector(".bill-trend-panel.is-focusing-series")?.classList.remove("is-focusing-series");
+    document.querySelectorAll(".bill-trend-panel [data-bill-trend-series].is-active-series").forEach((node) => node.classList.remove("is-active-series"));
+    document.querySelectorAll(".bill-trend-cursor-line").forEach((node) => {
+      node.hidden = true;
+      node.classList.remove("is-visible");
+    });
   }
 
   function moveBillTrendTooltip(event) {
@@ -264,10 +399,51 @@ export function bindEvents(app, elements, renderer, formController, authControll
       hideBillTrendTooltip();
       return;
     }
+    const panel = target.closest(".bill-trend-panel");
+    const seriesId = target.dataset.billTrendSeries || "";
+    const cursorX = target.dataset.billTrendCursorX;
+    if (panel && seriesId) {
+      panel.classList.add("is-focusing-series");
+      panel.querySelectorAll("[data-bill-trend-series]").forEach((node) => node.classList.toggle("is-active-series", node.dataset.billTrendSeries === seriesId));
+    }
+    if (panel && cursorX) {
+      const cursorLine = panel.querySelector(".bill-trend-cursor-line");
+      if (cursorLine) {
+        cursorLine.setAttribute("x1", cursorX);
+        cursorLine.setAttribute("x2", cursorX);
+        cursorLine.hidden = false;
+        cursorLine.classList.add("is-visible");
+      }
+    }
     const parts = String(target.dataset.billTrendTooltip || "").split(" · ");
     const title = parts[0] || "趋势";
     const meta = parts.slice(1).join(" · ");
-    billTrendTooltip.innerHTML = `<strong>${escapeHtml(title)}</strong>${meta ? `<span>${escapeHtml(meta)}</span>` : ""}`;
+    const detailLines = String(target.dataset.billTrendTooltipLines || "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const detailHtml = detailLines
+      .map((line) => {
+        const [type, ...textParts] = line.split("|");
+        const text = textParts.length ? textParts.join("|") : type;
+        const valueMatch = text.match(/(¥[\d,.-]+|[-+]?\d+(?:\.\d+)?%?)$/);
+        const label = valueMatch ? text.slice(0, valueMatch.index).trim() : text;
+        const value = valueMatch ? valueMatch[0] : "";
+        const normalizedType = String(textParts.length ? type : "default").replace(/[^\w-]/g, "");
+        return `
+          <em class="bill-trend-tooltip__line--${escapeHtml(normalizedType)}">
+            <i></i>
+            <b>${escapeHtml(label || text)}</b>
+            ${value ? `<strong>${escapeHtml(value)}</strong>` : ""}
+          </em>
+        `;
+      })
+      .join("");
+    billTrendTooltip.innerHTML = `
+      <strong>${escapeHtml(title)}</strong>
+      ${meta ? `<span>${escapeHtml(meta)}</span>` : ""}
+      ${detailLines.length ? `<div class="bill-trend-tooltip__grid">${detailHtml}</div>` : ""}
+    `;
     billTrendTooltip.hidden = false;
     billTrendTooltip.classList.add("is-visible");
 
@@ -278,6 +454,340 @@ export function bindEvents(app, elements, renderer, formController, authControll
     const y = Math.min(Math.max(event.clientY, height + margin), window.innerHeight - margin);
     billTrendTooltip.style.left = `${Math.round(x)}px`;
     billTrendTooltip.style.top = `${Math.round(y)}px`;
+  }
+
+  function showBillTrendProblemDialog(target) {
+    const dialog = document.createElement("dialog");
+    dialog.className = "modal bill-trend-problem-modal";
+    const title = target.dataset.problemTitle || "趋势异常";
+    const period = target.dataset.problemPeriod || "当前节点";
+    const label = target.dataset.problemLabel || "异常点";
+    const basis = target.dataset.problemBasis || "当前节点触发异常规则。";
+    const action = target.dataset.problemAction || "建议复核该时间点的账单。";
+    const income = target.dataset.problemIncome || "¥0";
+    const expense = target.dataset.problemExpense || "¥0";
+    const balance = target.dataset.problemBalance || "¥0";
+    dialog.innerHTML = `
+      <section class="modal-panel bill-trend-problem-panel">
+        <div class="drawer-head">
+          <div>
+            <span class="eyebrow">TREND ALERT</span>
+            <h2>${escapeHtml(title)}</h2>
+          </div>
+          <button class="icon-button" data-close-trend-problem type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="bill-trend-problem-body">
+          <article class="bill-trend-problem-hero">
+            <span>${escapeHtml(period)}</span>
+            <strong>${escapeHtml(label)}</strong>
+          </article>
+          <div class="bill-trend-problem-metrics">
+            <article><span>收入</span><strong class="is-income">${escapeHtml(income)}</strong></article>
+            <article><span>支出</span><strong class="is-expense">${escapeHtml(expense)}</strong></article>
+            <article><span>结余</span><strong>${escapeHtml(balance)}</strong></article>
+          </div>
+          <div class="bill-trend-problem-grid">
+            <article>
+              <span>判断依据</span>
+              <p>${escapeHtml(basis)}</p>
+            </article>
+            <article>
+              <span>处理建议</span>
+              <p>${escapeHtml(action)}</p>
+            </article>
+          </div>
+        </div>
+      </section>
+    `;
+    const close = () => {
+      dialog.close();
+      dialog.remove();
+    };
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog || event.target.closest("[data-close-trend-problem]")) close();
+    });
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      close();
+    });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+  }
+
+  function getBillActionDetailBasis(label, tone) {
+    if (label === "预算") return "来自分类预算建议，优先处理最容易拉高本月支出的类别。";
+    if (label === "节奏" || label === "额度") return "来自本月收入、已用预算、剩余天数和动态可支配额度。";
+    if (label === "计划") return "来自未来计划金额与当前结余，用于提前安排资金储备。";
+    if (label === "订阅") return "来自本月订阅和续费项目，避免固定支出继续堆高。";
+    if (label === "延续") return "来自上月未完成行动项，本月需要继续跟进。";
+    if (tone === "risk") return "来自风险提醒，当前项目可能影响本月现金流或预算判断。";
+    if (tone === "watch") return "来自关注项，建议本月持续观察并控制节奏。";
+    return "来自本月收支分析、预算节奏和月度复盘建议。";
+  }
+
+  function getBillActionDetailFollow(label, status) {
+    if (status === "已完成") return "已完成后月底复盘时保留结果，方便对比行动是否有效。";
+    if (label === "预算" || label === "节奏" || label === "额度") return "建议每周检查一次，发现超前支出后及时调低后续日均额度。";
+    if (label === "计划") return "建议把预留金额写入未来计划，按月确认是否已经准备。";
+    if (label === "订阅") return "建议逐项核对必要性，暂停新增订阅，并在续费前再次确认。";
+    return "处理后把状态改为进行中或已完成，月底生成月报时会一并记录。";
+  }
+
+  function showBillActionDetailDialog(target) {
+    const dialog = document.createElement("dialog");
+    dialog.className = "modal bill-action-detail-modal";
+    const id = target.dataset.actionId || "";
+    const month = target.dataset.actionMonth || "";
+    const label = target.dataset.actionLabel || "行动";
+    const title = target.dataset.actionTitle || "行动详情";
+    const text = target.dataset.actionText || "暂无处理说明。";
+    const metric = target.dataset.actionMetric || "待处理";
+    const tone = target.dataset.actionTone || "good";
+    const status = target.dataset.actionStatus || "待处理";
+    const nextStatus = target.dataset.actionNextStatus || "进行中";
+    const date = target.dataset.actionDate || "";
+    const statusText = date ? `${status} · ${date}` : status;
+    const basis = getBillActionDetailBasis(label, tone);
+    const follow = getBillActionDetailFollow(label, status);
+    const toneLabel = tone === "risk" ? "高优先级" : tone === "watch" ? "需关注" : "稳定执行";
+    dialog.innerHTML = `
+      <section class="modal-panel bill-action-detail-panel bill-action-detail-panel--${escapeHtml(tone)}">
+        <div class="drawer-head">
+          <div>
+            <span class="eyebrow">ACTION DETAIL</span>
+            <h2>${escapeHtml(title)}</h2>
+          </div>
+          <button class="icon-button" data-close-bill-action-detail type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="bill-action-detail-body">
+          <article class="bill-action-detail-hero">
+            <span>${escapeHtml(month)} · ${escapeHtml(label)}</span>
+            <strong>${escapeHtml(toneLabel)}</strong>
+            <p>${escapeHtml(text)}</p>
+          </article>
+          <div class="bill-action-detail-metrics">
+            <article><span>目标指标</span><strong>${escapeHtml(metric)}</strong></article>
+            <article><span>当前状态</span><strong>${escapeHtml(statusText)}</strong></article>
+          </div>
+          <div class="bill-action-detail-grid">
+            <article>
+              <span>需要处理</span>
+              <p>${escapeHtml(text)}</p>
+            </article>
+            <article>
+              <span>判断依据</span>
+              <p>${escapeHtml(basis)}</p>
+            </article>
+            <article>
+              <span>建议动作</span>
+              <p>${escapeHtml(text)}</p>
+            </article>
+            <article>
+              <span>跟进方式</span>
+              <p>${escapeHtml(follow)}</p>
+            </article>
+          </div>
+          <div class="bill-action-detail-actions">
+            <button
+              class="bill-action-status"
+              data-bill-action-status="${escapeHtml(id)}"
+              data-bill-action-month="${escapeHtml(month)}"
+              data-next-status="${escapeHtml(nextStatus)}"
+              type="button"
+            >标记为${escapeHtml(nextStatus)}</button>
+            <button class="ghost-button" data-close-bill-action-detail type="button">关闭</button>
+          </div>
+        </div>
+      </section>
+    `;
+    const close = () => {
+      dialog.close();
+      dialog.remove();
+    };
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog || event.target.closest("[data-close-bill-action-detail]")) close();
+    });
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      close();
+    });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+  }
+
+  function formatReportCurrency(value) {
+    const amount = Number(value || 0);
+    return `¥${amount.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`;
+  }
+
+  function getBillReportById(id) {
+    return (app.store.getData().notes || []).find((item) => item.id === id);
+  }
+
+  function getBillReportSections(markdown = "") {
+    const lines = String(markdown || "").replace(/\r/g, "").split("\n");
+    const sections = [];
+    let current = null;
+    lines.forEach((line) => {
+      if (line.startsWith("# ")) return;
+      if (line.startsWith("## ")) {
+        if (current) sections.push(current);
+        current = { title: line.slice(3).trim(), lines: [] };
+        return;
+      }
+      if (current) current.lines.push(line);
+    });
+    if (current) sections.push(current);
+    return sections
+      .map((section) => ({ ...section, body: section.lines.join("\n").trim() }))
+      .filter((section) => section.body);
+  }
+
+  function renderBillReportSection(section) {
+    return `
+      <section class="bill-report-section-card">
+        <h2>${escapeHtml(section.title)}</h2>
+        <div class="markdown-preview">${renderMarkdown(section.body)}</div>
+      </section>
+    `;
+  }
+
+  function buildBillReportHtml(note, options = {}) {
+    const report = note?.billReportSummary || {};
+    const month = note?.billReportMonth || String(note?.title || "").match(/\d{4}-\d{2}/)?.[0] || "未记录";
+    const qualityStatus = report.qualityStatus || "旧版";
+    const sections = getBillReportSections(note?.content || "");
+    const priorityTitles = ["核心摘要", "风险提醒", "预算节奏", "未来计划", "分类流向", "行动清单", "月报结论"];
+    const primarySections = priorityTitles
+      .map((title) => sections.find((section) => section.title === title))
+      .filter(Boolean);
+    const secondarySections = sections.filter((section) => !priorityTitles.includes(section.title));
+    const printableClass = options.printable ? " bill-report-document--print" : "";
+    return `
+      <article class="bill-report-document${printableClass}">
+        <header class="bill-report-document__cover">
+          <div>
+            <span>MONTHLY FINANCE REPORT · ${escapeHtml(qualityStatus)}</span>
+            <h1>${escapeHtml(month)} 生活收支月报</h1>
+            <p>${escapeHtml(note?.description || "暂无月报结论")}</p>
+          </div>
+          <div class="bill-report-score-badge">
+            <span>健康分</span>
+            <strong>${escapeHtml(String(report.healthScore ?? "-"))}</strong>
+          </div>
+        </header>
+        <section class="bill-report-document__kpis">
+          <article><span>收入</span><strong>${formatReportCurrency(report.income)}</strong></article>
+          <article><span>支出</span><strong>${formatReportCurrency(report.expense)}</strong></article>
+          <article><span>结余</span><strong class="${Number(report.balance || 0) < 0 ? "is-risk" : "is-good"}">${formatReportCurrency(report.balance)}</strong></article>
+          <article><span>预算使用</span><strong>${escapeHtml(String(report.budgetUsedRate ?? "-"))}%</strong></article>
+        </section>
+        <section class="bill-report-document__meta">
+          <article><span>最大流向</span><strong>${escapeHtml(report.topCategory || "暂无")}</strong><small>${formatReportCurrency(report.topCategoryAmount)}</small></article>
+          <article><span>待处理风险</span><strong>${escapeHtml(String(report.riskCount ?? 0))} 项</strong><small>高优先级事项</small></article>
+          <article><span>未来缺口</span><strong>${formatReportCurrency(report.futureGap)}</strong><small>未来 3 个月计划/续费</small></article>
+          <article><span>行动完成</span><strong>${escapeHtml(String(report.actionDone ?? 0))}/${escapeHtml(String(report.actionTotal ?? 0))}</strong><small>本月行动清单</small></article>
+        </section>
+        <section class="bill-report-document__layout">
+          <div class="bill-report-document__main">
+            ${primarySections.map(renderBillReportSection).join("") || `<section class="bill-report-section-card"><h2>月报内容</h2><div class="markdown-preview">${renderMarkdown(note?.content || note?.description || "暂无月报内容")}</div></section>`}
+          </div>
+          <aside class="bill-report-document__side">
+            ${secondarySections.slice(0, 5).map(renderBillReportSection).join("")}
+          </aside>
+        </section>
+      </article>
+    `;
+  }
+
+  function printBillReport(note) {
+    const frame = document.createElement("iframe");
+    frame.className = "bill-report-print-frame";
+    const title = `${note?.billReportMonth || "生活收支"}-月报`;
+    frame.srcdoc = `
+      <!doctype html>
+      <html lang="zh-CN">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(title)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            html, body { width: 210mm; min-height: 297mm; }
+            body { margin: 0; background: #f4f7f4; color: #17322a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+            .bill-report-document { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 13mm; background: #fff; }
+            .bill-report-document__cover { display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: end; border: 1px solid #d9e7df; border-radius: 14px; background: linear-gradient(135deg, #eef8f1, #fff 62%); padding: 18px; }
+            .bill-report-document__cover span, .bill-report-document__kpis span, .bill-report-document__meta span, .bill-report-score-badge span, .bill-report-section-card h2 { color: #60776d; font-size: 10.5px; font-weight: 800; letter-spacing: .04em; }
+            .bill-report-document__cover h1 { margin: 5px 0 7px; color: #0f2f27; font-size: 25px; line-height: 1.1; }
+            .bill-report-document__cover p { margin: 0; color: #39564c; font-size: 12px; line-height: 1.55; }
+            .bill-report-score-badge { min-width: 78px; border-radius: 12px; background: #0f7a4d; color: #fff; padding: 10px; text-align: center; }
+            .bill-report-score-badge span { display: block; color: rgba(255,255,255,.76); }
+            .bill-report-score-badge strong { display: block; margin-top: 3px; color: #fff; font-size: 38px; line-height: 1; }
+            .bill-report-document__kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+            .bill-report-document__meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+            .bill-report-document__kpis article, .bill-report-document__meta article, .bill-report-section-card { border: 1px solid #dfeae3; border-radius: 10px; background: #fbfdfb; padding: 9px; break-inside: avoid; }
+            .bill-report-document__kpis strong, .bill-report-document__meta strong { display: block; margin-top: 4px; color: #18362d; font-size: 15px; line-height: 1.18; }
+            .bill-report-document__meta small { display: block; margin-top: 3px; color: #6a8077; font-size: 10.5px; }
+            .is-good { color: #0f7a4d !important; }
+            .is-risk { color: #d23b3b !important; }
+            .bill-report-document__layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, .85fr); gap: 9px; margin-top: 10px; align-items: start; }
+            .bill-report-document__main, .bill-report-document__side { display: grid; gap: 8px; }
+            .bill-report-section-card h2 { margin: 0 0 7px; border-bottom: 1px solid #e2ece6; padding-bottom: 5px; color: #15372e; font-size: 13px; }
+            .bill-report-section-card h1 { display: none; }
+            .bill-report-section-card .markdown-preview h1, .bill-report-section-card .markdown-preview h2 { display: none; }
+            .bill-report-section-card p, .bill-report-section-card li { color: #2d4b41; font-size: 10.5px; line-height: 1.5; }
+            .bill-report-section-card ul { margin: 0; padding-left: 16px; }
+            .bill-report-section-card p { margin: 0 0 5px; }
+            @page { size: A4; margin: 0; }
+          </style>
+        </head>
+        <body>${buildBillReportHtml(note, { printable: true })}</body>
+      </html>
+    `;
+    frame.addEventListener("load", () => {
+      frame.contentWindow?.focus();
+      frame.contentWindow?.print();
+      window.setTimeout(() => frame.remove(), 1200);
+    }, { once: true });
+    document.body.appendChild(frame);
+  }
+
+  function showBillReportDialog(note) {
+    if (!note) {
+      window.alert("未找到这份月报。");
+      return;
+    }
+    const dialog = document.createElement("dialog");
+    dialog.className = "modal bill-report-modal";
+    dialog.innerHTML = `
+      <section class="modal-panel bill-report-modal__panel">
+        <div class="drawer-head bill-report-modal__head">
+          <div>
+            <span class="eyebrow">REPORT DETAIL</span>
+            <h2>${escapeHtml(note.title || "生活收支月报")}</h2>
+          </div>
+          <div class="bill-report-modal__actions">
+            <button class="ghost-button" data-bill-report-print="${escapeHtml(note.id)}" type="button">导出 PDF</button>
+            <button class="icon-button" data-close-bill-report type="button" aria-label="关闭">×</button>
+          </div>
+        </div>
+        <div class="bill-report-modal__body">
+          ${buildBillReportHtml(note)}
+        </div>
+      </section>
+    `;
+    const close = () => {
+      dialog.close();
+      dialog.remove();
+    };
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog || event.target.closest("[data-close-bill-report]")) close();
+    });
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      close();
+    });
+    document.body.appendChild(dialog);
+    dialog.showModal();
   }
 
   function escapeHtml(value) {
@@ -291,6 +801,238 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
   document.addEventListener("pointermove", moveBillTrendTooltip);
   document.addEventListener("pointerleave", hideBillTrendTooltip);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const billActionDetailTarget = event.target.closest?.("[data-bill-action-detail]");
+    const billReportTarget = event.target.closest?.("[data-bill-report-open]");
+    if (billActionDetailTarget && !event.target.closest?.("button")) {
+      event.preventDefault();
+      showBillActionDetailDialog(billActionDetailTarget);
+      return;
+    }
+    if (billReportTarget && !event.target.closest?.("button")) {
+      event.preventDefault();
+      showBillReportDialog(getBillReportById(billReportTarget.dataset.billReportOpen));
+    }
+  });
+
+  document.addEventListener(
+    "wheel",
+    (event) => {
+      const chart = event.target.closest?.(".bill-trend-chart");
+      if (!chart) return;
+      event.preventDefault();
+      hideBillTrendTooltip();
+      scheduleBillTrendWheelZoom(event, chart);
+    },
+    { passive: false },
+  );
+
+  let billTrendPanState = null;
+  let billTrendPanFrame = 0;
+  let billTrendPanX = 0;
+  let billTrendSelectionState = null;
+
+  function updateBillTrendPanWindow(clientX) {
+    if (!billTrendPanState?.chart?.isConnected) return;
+    const rect = billTrendPanState.chart.getBoundingClientRect();
+    const width = Math.max(rect.width, 1);
+    const deltaPercent = ((clientX - billTrendPanState.startX) / width) * billTrendPanState.span;
+    const nextStart = Math.min(Math.max(billTrendPanState.start - deltaPercent, 0), 100 - billTrendPanState.span);
+    const nextEnd = nextStart + billTrendPanState.span;
+    billTrendPanState.latestStart = nextStart;
+    billTrendPanState.latestEnd = nextEnd;
+    const plotWidth = 920 - 40;
+    const visualShift = ((billTrendPanState.start - nextStart) / billTrendPanState.span) * plotWidth;
+    billTrendPanState.chart.querySelector(".bill-trend-zoom-layer")?.setAttribute("transform", `translate(${Math.round(visualShift)} 0)`);
+    const startInput = billTrendPanState.chart.querySelector("[data-bill-trend-zoom-start]");
+    const endInput = billTrendPanState.chart.querySelector("[data-bill-trend-zoom-end]");
+    if (startInput) startInput.value = String(Math.round(Math.min(nextStart, 96)));
+    if (endInput) endInput.value = String(Math.round(Math.max(nextEnd, 4)));
+  }
+
+  function scheduleBillTrendPan(clientX) {
+    billTrendPanX = clientX;
+    if (billTrendPanFrame) return;
+    billTrendPanFrame = requestAnimationFrame(() => {
+      billTrendPanFrame = 0;
+      updateBillTrendPanWindow(billTrendPanX);
+    });
+  }
+
+  function beginBillTrendPan(chart, clientX, pointerId, captureTarget = null) {
+    const start = Number(app.ui.filters.billTrendZoomStart ?? 0);
+    const end = Number(app.ui.filters.billTrendZoomEnd ?? 100);
+    const span = end - start;
+    if (span >= 99) return;
+    billTrendPanState = {
+      chart,
+      pointerId,
+      startX: clientX,
+      start,
+      end,
+      span,
+      latestStart: start,
+      latestEnd: end,
+      captureTarget,
+    };
+    chart.classList.add("is-panning");
+    try {
+      captureTarget?.setPointerCapture?.(pointerId);
+    } catch {
+      chart.setPointerCapture?.(pointerId);
+    }
+    hideBillTrendTooltip();
+  }
+
+  function getBillTrendPlotRatio(chart, clientX) {
+    const svg = chart.querySelector("svg");
+    const rect = svg?.getBoundingClientRect() || chart.getBoundingClientRect();
+    const leftPadding = rect.width * (20 / 920);
+    const rightPadding = rect.width * (20 / 920);
+    const plotLeft = rect.left + leftPadding;
+    const plotWidth = Math.max(rect.width - leftPadding - rightPadding, 1);
+    return Math.min(Math.max((clientX - plotLeft) / plotWidth, 0), 1);
+  }
+
+  function svgSelectionXFromRatio(ratio) {
+    return 20 + Math.min(Math.max(ratio, 0), 1) * (920 - 40);
+  }
+
+  function updateBillTrendSelection(clientX) {
+    if (!billTrendSelectionState?.chart?.isConnected) return;
+    const ratio = getBillTrendPlotRatio(billTrendSelectionState.chart, clientX);
+    const startX = svgSelectionXFromRatio(billTrendSelectionState.startRatio);
+    const endX = svgSelectionXFromRatio(ratio);
+    const selection = billTrendSelectionState.chart.querySelector(".bill-trend-selection");
+    if (!selection) return;
+    selection.hidden = false;
+    selection.setAttribute("x", String(Math.round(Math.min(startX, endX))));
+    selection.setAttribute("width", String(Math.max(1, Math.round(Math.abs(endX - startX)))));
+    billTrendSelectionState.latestRatio = ratio;
+    if (Math.abs(clientX - billTrendSelectionState.startX) > 6) billTrendSelectionState.moved = true;
+  }
+
+  function beginBillTrendSelection(chart, clientX, pointerId, captureTarget = null) {
+    const ratio = getBillTrendPlotRatio(chart, clientX);
+    billTrendSelectionState = {
+      chart,
+      pointerId,
+      startX: clientX,
+      startRatio: ratio,
+      latestRatio: ratio,
+      moved: false,
+      captureTarget,
+    };
+    chart.classList.add("is-selecting");
+    try {
+      captureTarget?.setPointerCapture?.(pointerId);
+    } catch {
+      chart.setPointerCapture?.(pointerId);
+    }
+    hideBillTrendTooltip();
+  }
+
+  function endBillTrendSelection(pointerId) {
+    if (!billTrendSelectionState || pointerId !== billTrendSelectionState.pointerId) return;
+    const { chart, startRatio, latestRatio, moved, captureTarget } = billTrendSelectionState;
+    chart.classList.remove("is-selecting");
+    const selection = chart.querySelector(".bill-trend-selection");
+    if (selection) {
+      selection.hidden = true;
+      selection.setAttribute("width", "0");
+    }
+    try {
+      captureTarget?.releasePointerCapture?.(pointerId);
+    } catch {
+      chart.releasePointerCapture?.(pointerId);
+    }
+    billTrendSelectionState = null;
+    if (!moved || Math.abs(latestRatio - startRatio) < 0.025) return;
+    const currentStart = Number(app.ui.filters.billTrendZoomStart ?? 0);
+    const currentEnd = Number(app.ui.filters.billTrendZoomEnd ?? 100);
+    const span = Math.max(currentEnd - currentStart, 4);
+    const selectedStart = currentStart + Math.min(startRatio, latestRatio) * span;
+    const selectedEnd = currentStart + Math.max(startRatio, latestRatio) * span;
+    setBillTrendZoomWindow(selectedStart, selectedEnd);
+  }
+
+  document.addEventListener("pointerdown", (event) => {
+    const chart = event.target.closest?.(".bill-trend-chart");
+    if (!chart || event.button !== 0) return;
+    const currentStart = Number(app.ui.filters.billTrendZoomStart ?? 0);
+    const currentEnd = Number(app.ui.filters.billTrendZoomEnd ?? 100);
+    const isZoomed = currentEnd - currentStart < 99;
+    if (isZoomed) {
+      beginBillTrendPan(chart, event.clientX, event.pointerId, event.target);
+    } else {
+      beginBillTrendSelection(chart, event.clientX, event.pointerId, event.target);
+    }
+    event.preventDefault();
+  });
+
+  document.addEventListener("pointermove", (event) => {
+    if (billTrendSelectionState && event.pointerId === billTrendSelectionState.pointerId) {
+      updateBillTrendSelection(event.clientX);
+      event.preventDefault();
+      return;
+    }
+    if (!billTrendPanState || event.pointerId !== billTrendPanState.pointerId) return;
+    scheduleBillTrendPan(event.clientX);
+    event.preventDefault();
+  });
+
+  document.addEventListener("mousedown", (event) => {
+    const chart = event.target.closest?.(".bill-trend-chart");
+    if (!chart || event.button !== 0 || billTrendSelectionState) return;
+    const currentStart = Number(app.ui.filters.billTrendZoomStart ?? 0);
+    const currentEnd = Number(app.ui.filters.billTrendZoomEnd ?? 100);
+    if (currentEnd - currentStart >= 99) return;
+    beginBillTrendPan(chart, event.clientX, "mouse", null);
+    event.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (event) => {
+    if (!billTrendPanState || billTrendPanState.pointerId !== "mouse") return;
+    scheduleBillTrendPan(event.clientX);
+    event.preventDefault();
+  });
+
+  function endBillTrendPan(pointerId) {
+    if (!billTrendPanState || pointerId !== billTrendPanState.pointerId) return;
+    if (billTrendPanFrame) {
+      cancelAnimationFrame(billTrendPanFrame);
+      billTrendPanFrame = 0;
+      updateBillTrendPanWindow(billTrendPanX);
+    }
+    const { latestStart, latestEnd } = billTrendPanState;
+    billTrendPanState.chart.querySelector(".bill-trend-zoom-layer")?.removeAttribute("transform");
+    billTrendPanState.chart.classList.remove("is-panning");
+    try {
+      billTrendPanState.captureTarget?.releasePointerCapture?.(pointerId);
+    } catch {
+      billTrendPanState.chart.releasePointerCapture?.(pointerId);
+    }
+    billTrendPanState = null;
+    setBillTrendZoomWindow(latestStart, latestEnd);
+  }
+
+  document.addEventListener("pointerup", (event) => endBillTrendPan(event.pointerId));
+  document.addEventListener("pointerup", (event) => endBillTrendSelection(event.pointerId));
+  document.addEventListener("pointercancel", (event) => {
+    endBillTrendPan(event.pointerId);
+    endBillTrendSelection(event.pointerId);
+  });
+  document.addEventListener("mouseup", () => endBillTrendPan("mouse"));
+
+  document.addEventListener("dblclick", (event) => {
+    const chart = event.target.closest?.(".bill-trend-chart");
+    if (!chart) return;
+    event.preventDefault();
+    hideBillTrendTooltip();
+    resetBillTrendZoom();
+  });
 
   function renderPreviewList(items = []) {
     if (!items.length) return `<span class="merge-preview-empty">无</span>`;
@@ -668,8 +1410,16 @@ export function bindEvents(app, elements, renderer, formController, authControll
   }
 
   document.addEventListener("click", async (event) => {
+    const trendProblemTarget = event.target.closest("[data-bill-trend-problem]");
+    if (trendProblemTarget) {
+      event.preventDefault();
+      hideBillTrendTooltip();
+      showBillTrendProblemDialog(trendProblemTarget);
+      return;
+    }
+
     if (event.target.closest('#entryForm button[value="cancel"]') || event.target.id === "entryModal") {
-      formController.close();
+      closeEntryModal();
       return;
     }
 
@@ -789,11 +1539,46 @@ export function bindEvents(app, elements, renderer, formController, authControll
       if (!(await ensureAuth())) return;
       const noteId = app.store.createBillMonthlyReview(createBillReviewButton.dataset.createBillReview);
       if (!noteId) {
-        window.alert("生成月度复盘失败，请确认当前月份有可分析数据。");
+        window.alert("生成月报失败，请确认当前月份有可分析数据。");
         return;
       }
-      window.alert("月度复盘已保存到笔记。");
+      window.alert("月报已保存到历史月报。");
       renderer.render();
+      return;
+    }
+
+    const billActionStatusButton = event.target.closest("[data-bill-action-status]");
+    if (billActionStatusButton) {
+      if (!(await ensureAuth())) return;
+      const ok = app.store.updateBillActionStatus(
+        billActionStatusButton.dataset.billActionMonth,
+        billActionStatusButton.dataset.billActionStatus,
+        billActionStatusButton.dataset.nextStatus || "待处理",
+      );
+      if (!ok) window.alert("行动项状态更新失败。");
+      billActionStatusButton.closest(".bill-action-detail-modal")?.close();
+      billActionStatusButton.closest(".bill-action-detail-modal")?.remove();
+      renderer.render();
+      return;
+    }
+
+    const billActionDetailTarget = event.target.closest("[data-bill-action-detail]");
+    if (billActionDetailTarget && !event.target.closest("button")) {
+      event.preventDefault();
+      showBillActionDetailDialog(billActionDetailTarget);
+      return;
+    }
+
+    const applyBudgetSuggestionsButton = event.target.closest("[data-apply-budget-suggestions]");
+    if (applyBudgetSuggestionsButton) {
+      const form = document.querySelector("#budgetForm");
+      const field = form?.querySelector('[name="categoryBudgets"]');
+      if (field) {
+        field.value = applyBudgetSuggestionsButton.dataset.applyBudgetSuggestions || "";
+        field.focus();
+        field.classList.add("is-focus-pulse");
+        window.setTimeout(() => field.classList.remove("is-focus-pulse"), 1200);
+      }
       return;
     }
 
@@ -836,11 +1621,28 @@ export function bindEvents(app, elements, renderer, formController, authControll
       return;
     }
 
+    const dashboardActionsButton = event.target.closest("[data-dashboard-open-actions]");
+    if (dashboardActionsButton) {
+      resetPageState(app, "bills");
+      app.ui.filters.billMonth = dashboardActionsButton.dataset.dashboardOpenActions || app.ui.filters.billMonth || "";
+      app.ui.filters.billTimelineScope = "month";
+      persistUiState(app.ui);
+      renderer.render();
+      requestAnimationFrame(() => {
+        const panel = document.querySelector("[data-bill-action-panel]");
+        panel?.scrollIntoView({ behavior: "smooth", block: "center" });
+        panel?.classList.add("is-focus-pulse");
+        window.setTimeout(() => panel?.classList.remove("is-focus-pulse"), 1400);
+      });
+      return;
+    }
+
     const dashboardLedgerButton = event.target.closest("[data-dashboard-open-ledger]");
     if (dashboardLedgerButton) {
       resetPageState(app, "bills");
       app.ui.filters.billMonth = dashboardLedgerButton.dataset.dashboardOpenLedger || "";
       app.ui.filters.billTimelineScope = "month";
+      app.ui.filters.billLedgerCategory = "";
       persistUiState(app.ui);
       renderer.render();
       requestAnimationFrame(() => {
@@ -854,6 +1656,34 @@ export function bindEvents(app, elements, renderer, formController, authControll
       app.ui.activeChip = filterButton.dataset.filter;
       persistUiState(app.ui);
       renderer.render();
+      return;
+    }
+
+    const billReportCompareButton = event.target.closest("[data-bill-report-compare]");
+    if (billReportCompareButton) {
+      app.ui.filters.billMonth = billReportCompareButton.dataset.billReportCompare;
+      app.ui.filters.billTimelineScope = "month";
+      persistUiState(app.ui);
+      renderer.render();
+      requestAnimationFrame(() => {
+        const panel = document.querySelector("[data-bill-report-panel]");
+        panel?.scrollIntoView({ behavior: "smooth", block: "center" });
+        panel?.classList.add("is-focus-pulse");
+        window.setTimeout(() => panel?.classList.remove("is-focus-pulse"), 1400);
+      });
+      return;
+    }
+
+    const billReportPrintButton = event.target.closest("[data-bill-report-print]");
+    if (billReportPrintButton) {
+      printBillReport(getBillReportById(billReportPrintButton.dataset.billReportPrint));
+      return;
+    }
+
+    const billReportOpenTarget = event.target.closest("[data-bill-report-open]");
+    if (billReportOpenTarget) {
+      if (event.target.closest("button, input, select, textarea, a, label")) return;
+      showBillReportDialog(getBillReportById(billReportOpenTarget.dataset.billReportOpen));
       return;
     }
 
@@ -887,6 +1717,8 @@ export function bindEvents(app, elements, renderer, formController, authControll
       const [type, id] = editButton.dataset.edit.split(":");
       const item = app.store.getEntry(type, id);
       if (item) {
+        const ledgerModal = editButton.closest("#billLedgerModal");
+        if (ledgerModal) billLedgerReturnMonth = getActiveBillLedgerMonth(ledgerModal);
         document.querySelector("#billLedgerModal")?.close();
         renderer.closeDrawer();
         formController.openEdit(type, item);
@@ -984,6 +1816,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     const billTrendModeButton = event.target.closest("[data-bill-trend-mode]");
     if (billTrendModeButton) {
       app.ui.filters.billTrendMode = billTrendModeButton.dataset.billTrendMode || "cashflow";
+      delete app.ui.filters.billTrendHiddenSeries;
       persistUiState(app.ui);
       renderer.render();
       return;
@@ -992,18 +1825,71 @@ export function bindEvents(app, elements, renderer, formController, authControll
     const billTrendScopeButton = event.target.closest("[data-bill-trend-scope]");
     if (billTrendScopeButton) {
       const nextScope = billTrendScopeButton.dataset.billTrendScope || "month";
-      app.ui.filters.billTrendScope = nextScope;
-      app.ui.filters.billTrendRange = nextScope === "year" ? 5 : 6;
-      persistUiState(app.ui);
-      renderer.render();
+      setBillTrendScope(nextScope);
       return;
     }
 
     const billTrendRangeButton = event.target.closest("[data-bill-trend-range]");
     if (billTrendRangeButton) {
       app.ui.filters.billTrendRange = Number(billTrendRangeButton.dataset.billTrendRange || 6);
+      delete app.ui.filters.billTrendHiddenSeries;
       persistUiState(app.ui);
       renderer.render();
+      return;
+    }
+
+    const billTrendCategoryToggle = event.target.closest("[data-bill-trend-category-toggle]");
+    if (billTrendCategoryToggle) {
+      const category = billTrendCategoryToggle.dataset.billTrendCategoryToggle || "";
+      const current = Array.isArray(app.ui.filters.billTrendCategories) ? [...app.ui.filters.billTrendCategories] : [];
+      const existingIndex = current.indexOf(category);
+      if (existingIndex >= 0) {
+        current.splice(existingIndex, 1);
+      } else {
+        if (current.length >= 3) current.shift();
+        current.push(category);
+      }
+      app.ui.filters.billTrendMode = "category";
+      app.ui.filters.billTrendCategories = current;
+      delete app.ui.filters.billTrendHiddenSeries;
+      persistUiState(app.ui);
+      renderer.render();
+      return;
+    }
+
+    const billTrendSeriesToggle = event.target.closest("[data-bill-trend-series-toggle]");
+    if (billTrendSeriesToggle) {
+      const seriesId = billTrendSeriesToggle.dataset.billTrendSeriesToggle;
+      const current = new Set(
+        Array.isArray(app.ui.filters.billTrendHiddenSeries)
+          ? app.ui.filters.billTrendHiddenSeries
+          : [...document.querySelectorAll("[data-bill-trend-series-toggle].is-muted")].map((button) => button.dataset.billTrendSeriesToggle).filter(Boolean),
+      );
+      const allSeries = [...document.querySelectorAll("[data-bill-trend-series-toggle]")].map((button) => button.dataset.billTrendSeriesToggle).filter(Boolean);
+      const visibleCount = allSeries.filter((id) => !current.has(id)).length;
+      if (current.has(seriesId)) {
+        current.delete(seriesId);
+      } else if (visibleCount > 1) {
+        current.add(seriesId);
+      }
+      app.ui.filters.billTrendHiddenSeries = [...current];
+      persistUiState(app.ui);
+      renderer.render();
+      return;
+    }
+
+    const billTrendCategoryFocus = event.target.closest("[data-bill-trend-category-focus]");
+    if (billTrendCategoryFocus) {
+      const category = billTrendCategoryFocus.dataset.billTrendCategoryFocus || "";
+      app.ui.filters.billMonth = billTrendCategoryFocus.dataset.billCategoryMonth || app.ui.filters.billMonth;
+      app.ui.filters.billTrendMode = "category";
+      app.ui.filters.billTrendCategories = category ? [category] : [];
+      delete app.ui.filters.billTrendHiddenSeries;
+      persistUiState(app.ui);
+      renderer.render();
+      requestAnimationFrame(() => {
+        document.querySelector(".bill-trend-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
+      });
       return;
     }
 
@@ -1021,7 +1907,35 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
     const openBillLedgerButton = event.target.closest("[data-open-bill-ledger]");
     if (openBillLedgerButton) {
-      document.querySelector("#billLedgerModal")?.showModal();
+      app.ui.filters.billLedgerCategory = "";
+      persistUiState(app.ui);
+      renderer.render();
+      requestAnimationFrame(() => {
+        document.querySelector("#billLedgerModal")?.showModal();
+      });
+      return;
+    }
+
+    const openBillCategoryButton = event.target.closest("[data-open-bill-category]");
+    if (openBillCategoryButton) {
+      app.ui.filters.billMonth = openBillCategoryButton.dataset.billCategoryMonth || app.ui.filters.billMonth;
+      app.ui.filters.billLedgerCategory = openBillCategoryButton.dataset.openBillCategory || "";
+      persistUiState(app.ui);
+      renderer.render();
+      requestAnimationFrame(() => {
+        document.querySelector("#billLedgerModal")?.showModal();
+      });
+      return;
+    }
+
+    const clearBillCategoryFilterButton = event.target.closest("[data-clear-bill-category-filter]");
+    if (clearBillCategoryFilterButton) {
+      app.ui.filters.billLedgerCategory = "";
+      persistUiState(app.ui);
+      renderer.render();
+      requestAnimationFrame(() => {
+        document.querySelector("#billLedgerModal")?.showModal();
+      });
       return;
     }
 
@@ -1034,18 +1948,19 @@ export function bindEvents(app, elements, renderer, formController, authControll
     const billLedgerMonthButton = event.target.closest("[data-bill-ledger-month]");
     if (billLedgerMonthButton) {
       const month = billLedgerMonthButton.dataset.billLedgerMonth;
+      const activeCategory = app.ui.filters.billLedgerCategory || "";
       const modal = billLedgerMonthButton.closest("#billLedgerModal");
       let visibleCount = 0;
       modal?.querySelectorAll("[data-bill-ledger-month]").forEach((button) => {
         button.classList.toggle("is-active", button === billLedgerMonthButton);
       });
       modal?.querySelectorAll("[data-bill-ledger-row]").forEach((row) => {
-        const isVisible = row.dataset.billMonthKey === month;
+        const isVisible = row.dataset.billMonthKey === month && (!activeCategory || row.dataset.billCategoryKey === activeCategory);
         row.hidden = !isVisible;
         if (isVisible) visibleCount += 1;
       });
       const count = modal?.querySelector("[data-bill-ledger-count]");
-      if (count) count.textContent = `${month} · ${visibleCount} 条`;
+      if (count) count.textContent = `${month}${activeCategory ? ` · ${activeCategory}` : ""} · ${visibleCount} 条`;
       return;
     }
 
@@ -1504,6 +2419,17 @@ export function bindEvents(app, elements, renderer, formController, authControll
     timelineDragState = null;
   });
 
+  document.addEventListener("input", (event) => {
+    if (!event.target.matches("[data-bill-trend-zoom-start], [data-bill-trend-zoom-end]")) return;
+    const chart = event.target.closest(".bill-trend-chart");
+    const startInput = chart?.querySelector("[data-bill-trend-zoom-start]");
+    const endInput = chart?.querySelector("[data-bill-trend-zoom-end]");
+    if (!startInput || !endInput) return;
+    const start = Number(startInput.value || 0);
+    const end = Number(endInput.value || 100);
+    setBillTrendZoomWindow(Math.min(start, end - 4), Math.max(end, start + 4));
+  });
+
   document.addEventListener("change", async (event) => {
     let shouldRender = false;
 
@@ -1649,7 +2575,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
 
   elements.entryForm.addEventListener("submit", async (event) => {
     if (event.submitter?.value === "cancel") {
-      formController.close();
+      closeEntryModal();
       return;
     }
     event.preventDefault();
@@ -1659,6 +2585,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     formController.close();
     persistUiState(app.ui);
     renderer.render();
+    reopenBillLedgerPanel();
   });
 
   document.addEventListener("submit", async (event) => {

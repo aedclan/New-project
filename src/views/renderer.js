@@ -474,6 +474,7 @@ function updateProgress(elements, data) {
 
 function dashboardActionAttributes(action = {}) {
   if (action.ledgerMonth) return `data-dashboard-open-ledger="${escapeHtml(action.ledgerMonth)}"`;
+  if (action.billActionsMonth) return `data-dashboard-open-actions="${escapeHtml(action.billActionsMonth)}"`;
   return `data-page-jump="${escapeHtml(action.page || "dashboard")}"`;
 }
 
@@ -497,6 +498,29 @@ function dashboardQueueItem(title, text, actionLabel, action, tone = "normal") {
       <button class="ghost-button" ${dashboardActionAttributes(action)} type="button">${escapeHtml(actionLabel)}</button>
     </article>
   `;
+}
+
+function getDashboardBudgetPace(summary) {
+  if (!summary.totalBudget) {
+    return {
+      label: "未设置",
+      hint: "进入生活收支设置总预算",
+      tone: "watch",
+    };
+  }
+  const days = getMonthDays(summary.month);
+  const todayKey = getDateKey(new Date());
+  const todayDay = todayKey.startsWith(summary.month) ? Number(todayKey.slice(8, 10)) : days.length;
+  const elapsedRate = days.length ? Math.round((todayDay / days.length) * 100) : 100;
+  const usedRate = Math.round((summary.expense / Math.max(summary.totalBudget, 1)) * 100);
+  const gap = usedRate - elapsedRate;
+  const label = gap > 10 ? "超前消耗" : gap < -10 ? "节奏宽松" : "节奏正常";
+  const tone = gap > 10 || usedRate >= 100 ? "risk" : gap >= 0 || usedRate >= 80 ? "watch" : "good";
+  return {
+    label,
+    hint: `时间 ${elapsedRate}% / 使用 ${usedRate}% · 剩余 ${formatCurrency(Math.max(summary.totalBudget - summary.expense, 0))}`,
+    tone,
+  };
 }
 
 function dashboardTrendBars(rows) {
@@ -535,6 +559,17 @@ function renderDashboard(elements, data, ui, recentViews, store) {
   const futureExpense = commitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const healthStatus =
     financeSummary.income <= 0 ? "待补录" : financeSummary.balance < 0 || financeRisks.some((risk) => risk.level === "risk") ? "风险" : financeRisks.some((risk) => risk.level === "watch") ? "关注" : "健康";
+  const healthTone = healthStatus === "风险" ? "risk" : healthStatus === "关注" || healthStatus === "待补录" ? "watch" : "good";
+  const topFinanceRisk = financeRisks.find((risk) => risk.level === "risk") || financeRisks.find((risk) => risk.level === "watch") || financeRisks[0] || { level: "good", title: "暂无明显风险", text: "生活收支处于可控状态。" };
+  const topFinanceRiskTone = topFinanceRisk.level === "risk" ? "risk" : topFinanceRisk.level === "watch" ? "watch" : "good";
+  const budgetPace = getDashboardBudgetPace(financeSummary);
+  const billActions = buildMonthlyActionItems(data, financeSummary, financeRisks, commitments);
+  const billActionStatusMap = ((data.budgets || {}).billActionStatuses || {})[month] || {};
+  const doneBillActions = billActions.filter((item) => billActionStatusMap[item.id] === "已完成").length;
+  const doingBillActions = billActions.filter((item) => billActionStatusMap[item.id] === "进行中").length;
+  const openBillActions = Math.max(billActions.length - doneBillActions, 0);
+  const carriedBillActions = billActions.filter((item) => item.label === "延续").length;
+  const actionTone = !openBillActions ? "good" : carriedBillActions ? "risk" : doingBillActions ? "watch" : "watch";
   const doneTasks = data.tasks.filter((task) => task.status === "已完成").length;
   const progress = Math.round((doneTasks / Math.max(data.tasks.length, 1)) * 100);
   const notificationSettings = loadSubscriptionNotificationSettings();
@@ -562,6 +597,7 @@ function renderDashboard(elements, data, ui, recentViews, store) {
         ? "本月现金流为负，优先复核大额支出。"
         : `本月结余 ${formatCurrency(financeSummary.balance)}，未来计划 ${formatCurrency(futureExpense)}。`;
   const queueItems = [
+    openBillActions ? dashboardQueueItem("本月行动", `${doneBillActions}/${billActions.length} 已完成${carriedBillActions ? `，${carriedBillActions} 项上月延续` : `，${doingBillActions} 项进行中`}`, "处理行动", { billActionsMonth: month }, actionTone) : "",
     unclassifiedBills.length ? dashboardQueueItem("未分类流水", `${month} 有 ${unclassifiedBills.length} 条需要复核`, "复核流水", { ledgerMonth: month }, "risk") : "",
     subscriptionsOverview.upcoming?.length ? dashboardQueueItem("订阅临期", `30 天内 ${subscriptionsOverview.upcoming.length} 项到期`, "看订阅", { page: "subscriptions" }, subscriptionsOverview.urgent?.length ? "risk" : "watch") : "",
     overdueTasks.length ? dashboardQueueItem("逾期事项", `${overdueTasks.length} 项已经逾期`, "处理事项", { page: "tasks" }, "risk") : "",
@@ -588,10 +624,11 @@ function renderDashboard(elements, data, ui, recentViews, store) {
       </aside>
     </section>
     <div class="dashboard-metric-grid">
-      ${dashboardMetricCard("本月结余", formatCurrency(financeSummary.balance), `收入 ${formatCurrency(financeSummary.income)} / 支出 ${formatCurrency(financeSummary.expense)}`, { page: "bills" }, financeSummary.balance < 0 ? "risk" : "good")}
-      ${dashboardMetricCard("预算使用", financeSummary.totalBudget ? `${Math.round((financeSummary.expense / Math.max(financeSummary.totalBudget, 1)) * 100)}%` : "未设置", `${formatCurrency(financeSummary.expense)} / ${formatCurrency(financeSummary.totalBudget)}`, { page: "bills" }, financeSummary.totalBudget && financeSummary.expense > financeSummary.totalBudget ? "risk" : "")}
-      ${dashboardMetricCard("未来压力", formatCurrency(futureExpense), `未来 3 个月 ${commitments.length} 项`, { page: "bills" }, futureExpense > Math.max(financeSummary.balance, 0) + Math.max(financeSummary.income, 0) ? "watch" : "")}
-      ${dashboardMetricCard("待处理", String(queueItems.length), `${overdueTasks.length ? `${overdueTasks.length} 逾期 · ` : ""}${unclassifiedBills.length} 未分类`, unclassifiedBills.length ? { ledgerMonth: month } : { page: "tasks" }, queueItems.length > 2 ? "watch" : "")}
+      ${dashboardMetricCard("本月健康状态", healthStatus, `${month} · 支出率 ${financeSummary.income > 0 ? `${Math.round(financeSummary.expenseRate * 100)}%` : "缺少收入"}`, { page: "bills" }, healthTone)}
+      ${dashboardMetricCard("最大风险", topFinanceRisk.title, topFinanceRisk.text, { page: "bills" }, topFinanceRiskTone)}
+      ${dashboardMetricCard("当前预算节奏", budgetPace.label, budgetPace.hint, { page: "bills" }, budgetPace.tone)}
+      ${dashboardMetricCard("行动进度", `${doneBillActions}/${billActions.length} 已完成`, `${openBillActions} 项待推进${carriedBillActions ? ` · ${carriedBillActions} 项延续` : ""}`, { billActionsMonth: month }, actionTone)}
+      ${dashboardMetricCard("本月现金流", formatCurrency(financeSummary.balance), `收入 ${formatCurrency(financeSummary.income)} / 支出 ${formatCurrency(financeSummary.expense)}`, { page: "bills" }, financeSummary.balance < 0 ? "risk" : "good")}
     </div>
     ${
       notificationSettings.siteEnabled && subscriptionSummary.total
@@ -916,20 +953,307 @@ function getFutureCommitments(data, month) {
 
 function buildFinanceRisks(summary, commitments) {
   const risks = [];
-  if (summary.income <= 0 && summary.expense > 0) risks.push({ level: "risk", title: "缺少收入参照", text: "当前月份已有支出，但未录入工资或其他收入，无法判断支出是否健康。" });
-  if (summary.income > 0 && summary.expenseRate >= 0.9) risks.push({ level: "risk", title: "支出率过高", text: `本月支出已达收入 ${Math.round(summary.expenseRate * 100)}%，建议暂停非必要消费。` });
-  if (summary.income > 0 && summary.repaymentRate >= 0.35) risks.push({ level: "risk", title: "还款压力偏高", text: `还款占收入 ${Math.round(summary.repaymentRate * 100)}%，需要关注信用卡、房贷或分期。` });
-  if (summary.income > 0 && summary.fixedRate >= 0.4) risks.push({ level: "watch", title: "固定支出偏高", text: `固定支出占收入 ${Math.round(summary.fixedRate * 100)}%，下月可支配空间会被压缩。` });
-  if (summary.totalBudget > 0 && summary.expense / summary.totalBudget >= 0.8) risks.push({ level: summary.expense > summary.totalBudget ? "risk" : "watch", title: "预算接近上限", text: `总预算已使用 ${Math.round((summary.expense / summary.totalBudget) * 100)}%。` });
+  if (summary.income <= 0 && summary.expense > 0) {
+    risks.push({
+      level: "risk",
+      title: "缺少收入参照",
+      text: "当前月份已有支出，但未录入工资或其他收入，无法判断支出是否健康。",
+      basis: `收入 ${formatCurrency(summary.income)}，支出 ${formatCurrency(summary.expense)}。`,
+      action: "先补录工资、奖金或其他固定收入，再判断支出率。",
+    });
+  }
+  if (summary.income > 0 && summary.expenseRate >= 0.9) {
+    risks.push({
+      level: "risk",
+      title: "支出率过高",
+      text: `本月支出已达收入 ${Math.round(summary.expenseRate * 100)}%，建议暂停非必要消费。`,
+      basis: `支出率 ${Math.round(summary.expenseRate * 100)}% >= 风险线 90%。`,
+      action: "暂停新增非必要消费，优先复核最大分类和大额流水。",
+    });
+  }
+  if (summary.income > 0 && summary.repaymentRate >= 0.35) {
+    risks.push({
+      level: "risk",
+      title: "还款压力偏高",
+      text: `还款占收入 ${Math.round(summary.repaymentRate * 100)}%，需要关注信用卡、房贷或分期。`,
+      basis: `还款 ${formatCurrency(summary.repayment)} / 收入 ${formatCurrency(summary.income)} = ${Math.round(summary.repaymentRate * 100)}%，风险线 35%。`,
+      action: "优先确认还款日和最低还款额，避免同月叠加大额消费。",
+    });
+  }
+  if (summary.income > 0 && summary.fixedRate >= 0.4) {
+    risks.push({
+      level: "watch",
+      title: "固定支出偏高",
+      text: `固定支出占收入 ${Math.round(summary.fixedRate * 100)}%，下月可支配空间会被压缩。`,
+      basis: `固定支出 ${formatCurrency(summary.fixedExpense)} / 收入 ${formatCurrency(summary.income)} = ${Math.round(summary.fixedRate * 100)}%，关注线 40%。`,
+      action: "先预留固定支出，再给可变生活费设置日均上限。",
+    });
+  }
+  if (summary.totalBudget > 0 && summary.expense / summary.totalBudget >= 0.8) {
+    const budgetRate = summary.expense / summary.totalBudget;
+    risks.push({
+      level: summary.expense > summary.totalBudget ? "risk" : "watch",
+      title: "预算接近上限",
+      text: `总预算已使用 ${Math.round(budgetRate * 100)}%。`,
+      basis: `已用 ${formatCurrency(summary.expense)} / 总预算 ${formatCurrency(summary.totalBudget)} = ${Math.round(budgetRate * 100)}%，关注线 80%。`,
+      action: summary.expense > summary.totalBudget ? "本月停止非必要支出，月底复盘超支来源。" : "剩余时间按日均额度控制，避免提前耗尽预算。",
+    });
+  }
   const futureExpense = commitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  if (futureExpense > Math.max(summary.balance, 0) + Math.max(summary.income, 0)) risks.push({ level: "watch", title: "未来计划压力", text: `未来 3 个月计划/续费约 ${formatCurrency(futureExpense)}，建议提前安排储备。` });
-  if (!risks.length) risks.push({ level: "good", title: "暂无明显风险", text: "当前数据未触发高风险规则，继续保持收入、支出和预算录入。" });
+  const futureCapacity = Math.max(summary.balance, 0) + Math.max(summary.income, 0);
+  if (futureExpense > futureCapacity) {
+    risks.push({
+      level: "watch",
+      title: "未来计划压力",
+      text: `未来 3 个月计划/续费约 ${formatCurrency(futureExpense)}，建议提前安排储备。`,
+      basis: `未来压力 ${formatCurrency(futureExpense)} > 当前缓冲 ${formatCurrency(futureCapacity)}。`,
+      action: "把高优先级计划拆成月储备，低优先级计划先延后。",
+    });
+  }
+  if (!risks.length) {
+    risks.push({
+      level: "good",
+      title: "暂无明显风险",
+      text: "当前数据未触发高风险规则，继续保持收入、支出和预算录入。",
+      basis: "支出率、固定支出、还款、预算和未来计划均未触发风险线。",
+      action: "保持分类完整，月底保存复盘即可。",
+    });
+  }
   return risks.slice(0, 4);
+}
+
+function getRelativeMonth(month, offset) {
+  const { year, monthIndex } = getMonthDateParts(month);
+  const date = new Date(year, monthIndex + offset, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function buildMonthlySpendingAdvice(data, summary) {
+  const previousMonth = getRelativeMonth(summary.month, -1);
+  const previousSummary = getMonthlyFinanceSummary(data, previousMonth);
+  const topPrevious = previousSummary.categoryTotals[0] || null;
+  const topCurrent = summary.categoryTotals[0] || null;
+  const growthRows = summary.categoryTotals
+    .map((row) => {
+      const previous = previousSummary.categoryTotals.find((item) => item.category === row.category)?.amount || 0;
+      return { ...row, previous, growth: row.amount - previous };
+    })
+    .filter((row) => row.growth > 0)
+    .sort((left, right) => right.growth - left.growth);
+  const topGrowth = growthRows[0] || null;
+  const days = getMonthDays(summary.month);
+  const todayKey = getDateKey(new Date());
+  const todayDay = todayKey.startsWith(summary.month) ? Number(todayKey.slice(8, 10)) : days.length;
+  const daysLeft = Math.max(days.length - todayDay + 1, 1);
+  const spendingTarget = summary.totalBudget || Math.max(summary.income - Math.max(summary.income * 0.15, 0), 0);
+  const remainingTarget = Math.max(spendingTarget - summary.expense, 0);
+  const dailyAllowance = remainingTarget / daysLeft;
+  const suggestedReserve = Math.max(summary.income * 0.1, 0);
+  const flexibleTarget = Math.max(spendingTarget - summary.fixedExpense, 0);
+  const avoidCategory = topGrowth || topPrevious || topCurrent;
+  const hasPreviousData = previousSummary.expense > 0 || previousSummary.income > 0;
+  const focusItems = [
+    hasPreviousData && topPrevious
+      ? `上月主要流向是「${topPrevious.category}」，占上月支出 ${Math.round((topPrevious.amount / Math.max(previousSummary.expense, 1)) * 100)}%。`
+      : "上月数据不足，先保持本月分类和收入录入完整。",
+    topGrowth
+      ? `本月「${topGrowth.category}」已比上月多 ${formatCurrency(topGrowth.growth)}，建议优先检查是否必要。`
+      : topCurrent
+        ? `本月当前最大支出是「${topCurrent.category}」，继续观察是否超过预算节奏。`
+        : "本月暂无可分析支出，建议先导入或补录账单。",
+    spendingTarget
+      ? `本月剩余可用目标约 ${formatCurrency(remainingTarget)}，日均可安排 ${formatCurrency(dailyAllowance)}。`
+      : "尚未设置预算或收入，建议先录入月收入与总预算。",
+  ];
+  return {
+    previousMonth,
+    previousSummary,
+    topPrevious,
+    topCurrent,
+    topGrowth,
+    avoidCategory,
+    spendingTarget,
+    remainingTarget,
+    dailyAllowance,
+    suggestedReserve,
+    flexibleTarget,
+    focusItems,
+  };
+}
+
+function buildMonthlyActionItems(data, summary, risks, commitments) {
+  const actions = [];
+  const pushAction = (item) => {
+    if (!item?.title || actions.some((action) => action.title === item.title)) return;
+    const id = String(item.id || `${item.label}-${item.title}`)
+      .replace(/\s+/g, "-")
+      .replace(/[^\w\u4e00-\u9fa5-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    actions.push({ ...item, id });
+  };
+  const actionTitleFromId = (id) => String(id || "")
+    .replace(/^carry-\d{4}-\d{2}-/, "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const budgetLimit = Number(summary.totalBudget || 0);
+  const dynamicPlan = getDynamicBudgetPlan(summary, commitments);
+  const pacePlan = getBudgetPacePlan(summary);
+  const categorySuggestions = buildCategoryBudgetSuggestions(data, summary, dynamicPlan);
+  const topCategorySuggestion = categorySuggestions[0];
+  const topCategory = summary.categoryTotals[0];
+  const futureExpense = commitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const reserve = Math.max(summary.balance, 0);
+  const futureGap = Math.max(futureExpense - reserve, 0);
+  const monthlyReserve = futureExpense > 0 ? (futureGap > 0 ? futureGap / 3 : futureExpense / 3) : 0;
+  const subscriptions = commitments.filter((item) => item.source === "subscription" || item.planType === "订阅续费");
+  const subscriptionAmount = subscriptions.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const advice = buildMonthlySpendingAdvice(data, summary);
+
+  if (summary.income <= 0 && summary.expense > 0) {
+    pushAction({
+      tone: "risk",
+      label: "风险",
+      title: "补录本月收入",
+      text: "先补齐工资或固定收入，避免预算和风险判断失真。",
+      metric: "优先",
+    });
+  }
+
+  if (topCategorySuggestion) {
+    pushAction({
+      tone: topCategorySuggestion.level,
+      label: "预算",
+      title: `${topCategorySuggestion.category}控制线`,
+      text: topCategorySuggestion.action,
+      metric: formatCurrency(topCategorySuggestion.target),
+    });
+  } else if (topCategory) {
+    const categoryTarget = budgetLimit > 0 ? Math.max(budgetLimit - summary.expense + topCategory.amount, 0) : Math.max(topCategory.amount * 0.85, 0);
+    pushAction({
+      tone: summary.expenseRate >= 0.9 ? "risk" : "watch",
+      label: "流向",
+      title: `${topCategory.category}降频`,
+      text: `本月最大流向 ${formatCurrency(topCategory.amount)}，后续控制在 ${formatCurrency(categoryTarget)} 内。`,
+      metric: formatCurrency(topCategory.amount),
+    });
+  }
+
+  if (budgetLimit > 0) {
+    pushAction({
+      tone: pacePlan.level === "stable" ? "good" : pacePlan.level,
+      label: "节奏",
+      title: pacePlan.label,
+      text: pacePlan.action,
+      metric: formatCurrency(pacePlan.dailyBudget),
+    });
+  } else if (summary.income > 0) {
+    pushAction({
+      tone: "watch",
+      label: "节奏",
+      title: "设置总预算",
+      text: `建议先以 ${formatCurrency(Math.max(summary.income - summary.fixedExpense, 0))} 作为本月可安排上限。`,
+      metric: "待设",
+    });
+  }
+
+  if (summary.income > 0) {
+    pushAction({
+      tone: dynamicPlan.level,
+      label: "额度",
+      title: "按动态可支配执行",
+      text: `剩余自由支配 ${formatCurrency(dynamicPlan.freeRemaining)}，日均不超过 ${formatCurrency(dynamicPlan.dailyFree)}。`,
+      metric: formatCurrency(dynamicPlan.freeRemaining),
+    });
+  }
+
+  if (subscriptions.length) {
+    pushAction({
+      tone: subscriptionAmount > Math.max(summary.balance, 0) ? "watch" : "good",
+      label: "订阅",
+      title: "订阅暂停新增",
+      text: `先确认 ${subscriptions.length} 项续费，合计 ${formatCurrency(subscriptionAmount)}。`,
+      metric: `${subscriptions.length} 项`,
+    });
+  }
+
+  if (futureExpense > 0) {
+    pushAction({
+      tone: futureGap > 0 ? "watch" : "good",
+      label: "计划",
+      title: "预留未来计划",
+      text: `每月预留 ${formatCurrency(monthlyReserve)}，优先覆盖未来 3 个月安排。`,
+      metric: formatCurrency(futureExpense),
+    });
+  }
+
+  const primaryRisk = risks.find((item) => item.level === "risk" || item.level === "watch");
+  if (primaryRisk) {
+    pushAction({
+      tone: primaryRisk.level,
+      label: "提醒",
+      title: primaryRisk.title,
+      text: primaryRisk.text,
+      metric: primaryRisk.level === "risk" ? "高" : "中",
+    });
+  }
+
+  pushAction({
+    tone: "good",
+    label: "复盘",
+    title: "保留月底复盘",
+    text: `月底保存 ${summary.month} 复盘，记录风险、预算、计划和分类流向。`,
+    metric: "月底",
+  });
+  pushAction({
+    tone: "good",
+    label: "分类",
+    title: "保持分类完整",
+    text: advice.avoidCategory ? `重点检查「${advice.avoidCategory.category}」是否需要拆分或改类。` : "导入后按文件类型入账，不合理项再手动修正。",
+    metric: "持续",
+  });
+
+  const previousMonth = getRelativeMonth(summary.month, -1);
+  const previousStatuses = ((data.budgets || {}).billActionStatuses || {})[previousMonth] || {};
+  Object.entries(previousStatuses)
+    .filter(([, status]) => status !== "已完成")
+    .slice(0, 3)
+    .forEach(([id, status]) => {
+      const title = actionTitleFromId(id);
+      if (!title || actions.some((action) => action.title === title)) return;
+      const beforeCount = actions.length;
+      pushAction({
+        id: `carry-${previousMonth}-${id}`,
+        tone: status === "进行中" ? "watch" : "risk",
+        label: "延续",
+        title,
+        text: `${previousMonth} 未完成，建议本月继续跟进并标记结果。`,
+        metric: status || "待处理",
+      });
+      if (actions.length > beforeCount) {
+        const [carryAction] = actions.splice(actions.length - 1, 1);
+        actions.unshift(carryAction);
+      }
+    });
+
+  return actions.slice(0, 5);
 }
 
 function billDecisionStrip(summary, commitments) {
   const futureExpense = commitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const status = summary.income <= 0 ? "待补录" : summary.balance >= futureExpense * 0.5 ? "可控" : summary.balance >= 0 ? "关注" : "风险";
+  const reserveGap = Math.max(futureExpense - Math.max(summary.balance, 0), 0);
+  const dynamicPlan = getDynamicBudgetPlan(summary, commitments);
+  const action =
+    summary.income <= 0
+      ? "先补录收入"
+      : summary.balance < 0
+        ? "复核大额支出"
+        : reserveGap > 0
+          ? "安排未来储备"
+          : summary.totalBudget > 0 && summary.expense / summary.totalBudget >= 0.8
+            ? "控制预算节奏"
+            : "保持当前节奏";
   const text =
     summary.income <= 0
       ? "请先录入当月工资，分析才有收入参照。"
@@ -938,30 +1262,249 @@ function billDecisionStrip(summary, commitments) {
         : `本月结余 ${formatCurrency(summary.balance)}，未来 3 个月已知计划 ${formatCurrency(futureExpense)}。`;
   return `
     <section class="bill-decision-strip bill-decision-strip--${status === "风险" ? "risk" : status === "关注" ? "watch" : "stable"}">
-      <span>${escapeHtml(summary.month)} 月度结论</span>
-      <strong>${escapeHtml(status)}</strong>
-      <p>${escapeHtml(text)}</p>
+      <div class="bill-decision-strip__main">
+        <span>${escapeHtml(summary.month)} 月度结论</span>
+        <strong>${escapeHtml(status)}</strong>
+        <p>${escapeHtml(text)}</p>
+      </div>
+      <div class="bill-decision-strip__metrics">
+        <article><span>动态可支配</span><b>${formatCurrency(dynamicPlan.freeRemaining)}</b></article>
+        <article><span>未来压力</span><b>${formatCurrency(futureExpense)}</b></article>
+        <article><span>资金缺口</span><b>${formatCurrency(reserveGap)}</b></article>
+        <article><span>下一步</span><b>${escapeHtml(action)}</b></article>
+      </div>
     </section>
   `;
 }
 
-function billAnalysisPanel(summary) {
+function billMonthlyActionPanel(data, summary, risks, commitments) {
+  const actions = buildMonthlyActionItems(data, summary, risks, commitments);
+  const statusMap = ((data.budgets || {}).billActionStatuses || {})[summary.month] || {};
+  const statusMetaMap = ((data.budgets || {}).billActionStatusMeta || {})[summary.month] || {};
+  const statusMeta = {
+    待处理: { next: "进行中", label: "待处理" },
+    进行中: { next: "已完成", label: "进行中" },
+    已完成: { next: "待处理", label: "已完成" },
+  };
+  const doneCount = actions.filter((item) => statusMap[item.id] === "已完成").length;
+  const doingCount = actions.filter((item) => statusMap[item.id] === "进行中").length;
+  const todoCount = Math.max(actions.length - doneCount - doingCount, 0);
+  const statusWeight = { 进行中: 0, 待处理: 1, 已完成: 3 };
+  const toneWeight = { risk: 0, watch: 1, good: 2 };
+  const orderedActions = actions
+    .map((item, index) => ({ ...item, originalIndex: index }))
+    .sort((left, right) => {
+      const leftStatus = statusMap[left.id] || "待处理";
+      const rightStatus = statusMap[right.id] || "待处理";
+      const leftCarry = left.label === "延续" ? -1 : 0;
+      const rightCarry = right.label === "延续" ? -1 : 0;
+      return (
+        (statusWeight[leftStatus] ?? 1) - (statusWeight[rightStatus] ?? 1)
+        || leftCarry - rightCarry
+        || (toneWeight[left.tone] ?? 2) - (toneWeight[right.tone] ?? 2)
+        || left.originalIndex - right.originalIndex
+      );
+    });
+  return `
+    <section class="panel bill-action-panel" id="billActionPanel" data-bill-action-panel>
+      <div class="panel-head">
+        <h2>本月行动清单</h2>
+        <span class="results-count">${doneCount}/${actions.length} 已完成 · ${doingCount} 进行中 · ${todoCount} 待处理</span>
+      </div>
+      <div class="bill-action-list">
+        ${orderedActions.map((item, index) => {
+          const status = statusMap[item.id] || "待处理";
+          const meta = statusMeta[status] || statusMeta["待处理"];
+          const actionMeta = statusMetaMap[item.id] || {};
+          const statusDate = String(actionMeta.completedAt || actionMeta.updatedAt || "").slice(0, 10);
+          return `
+          <article
+            class="bill-action-item bill-action-item--${escapeHtml(item.tone)} bill-action-item--status-${status === "已完成" ? "done" : status === "进行中" ? "doing" : "todo"}"
+            data-bill-action-detail
+            data-action-id="${escapeHtml(item.id)}"
+            data-action-month="${escapeHtml(summary.month)}"
+            data-action-tone="${escapeHtml(item.tone)}"
+            data-action-label="${escapeHtml(item.label)}"
+            data-action-title="${escapeHtml(item.title)}"
+            data-action-text="${escapeHtml(item.text)}"
+            data-action-metric="${escapeHtml(item.metric)}"
+            data-action-status="${escapeHtml(status)}"
+            data-action-next-status="${escapeHtml(meta.next)}"
+            data-action-date="${escapeHtml(statusDate)}"
+            tabindex="0"
+            role="button"
+            aria-label="查看${escapeHtml(item.title)}详情"
+          >
+            <b>${String(index + 1).padStart(2, "0")}</b>
+            <div>
+              <span>${escapeHtml(item.label)}</span>
+              <strong>${escapeHtml(item.title)}</strong>
+              <p>${escapeHtml(item.text)}</p>
+            </div>
+            <em>${escapeHtml(item.metric)}</em>
+            ${statusDate ? `<small class="bill-action-date">${status === "已完成" ? "完成" : "更新"} ${escapeHtml(statusDate)}</small>` : ""}
+            <button class="bill-action-status" data-bill-action-status="${escapeHtml(item.id)}" data-bill-action-month="${escapeHtml(summary.month)}" data-next-status="${escapeHtml(meta.next)}" type="button">${escapeHtml(meta.label)}</button>
+          </article>
+        `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function getMonthlyReserveFromCommitments(summary, commitments) {
+  const futureExpense = commitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const reserve = Math.max(summary.balance, 0);
+  const fundingGap = Math.max(futureExpense - reserve, 0);
+  const monthlyReserve = futureExpense > 0 ? (fundingGap > 0 ? fundingGap / 3 : futureExpense / 3) : 0;
+  return { futureExpense, reserve, fundingGap, monthlyReserve };
+}
+
+function getDynamicBudgetPlan(summary, commitments) {
+  const { futureExpense, fundingGap, monthlyReserve } = getMonthlyReserveFromCommitments(summary, commitments);
+  const fixedReserve = Math.max(summary.fixedExpense, 0);
+  const plannedReserve = Math.max(monthlyReserve, 0);
+  const variableSpent = Math.max(summary.expense - summary.fixedExpense, 0);
+  const freeLimit = Math.max(summary.income - fixedReserve - plannedReserve, 0);
+  const freeRemaining = Math.max(freeLimit - variableSpent, 0);
+  const days = getMonthDays(summary.month);
+  const todayKey = getDateKey(new Date());
+  const todayDay = todayKey.startsWith(summary.month) ? Number(todayKey.slice(8, 10)) : days.length;
+  const daysLeft = Math.max(days.length - todayDay + 1, 1);
+  const dailyFree = freeRemaining / daysLeft;
+  const level = summary.income <= 0 || freeRemaining <= 0 ? "risk" : freeRemaining < freeLimit * 0.2 ? "watch" : "good";
+  return {
+    futureExpense,
+    fundingGap,
+    fixedReserve,
+    plannedReserve,
+    variableSpent,
+    freeLimit,
+    freeRemaining,
+    daysLeft,
+    dailyFree,
+    level,
+  };
+}
+
+function buildCategoryBudgetSuggestions(data, summary, dynamicPlan) {
+  const previousMonth = getRelativeMonth(summary.month, -1);
+  const previousSummary = getMonthlyFinanceSummary(data, previousMonth);
+  const configuredBudgets = new Map((summary.categoryBudgets || []).map((item) => [item.category, Number(item.amount || 0)]));
+  const categoryNames = [
+    ...summary.categoryTotals.slice(0, 6).map((item) => item.category),
+    ...previousSummary.categoryTotals.slice(0, 4).map((item) => item.category),
+    ...configuredBudgets.keys(),
+  ];
+  const uniqueNames = [...new Set(categoryNames.filter(Boolean))];
+  const flexiblePool = summary.totalBudget > 0 ? summary.totalBudget : dynamicPlan.freeLimit;
+  return uniqueNames
+    .map((category) => {
+      const used = summary.categoryTotals.find((item) => item.category === category)?.amount || 0;
+      const previous = previousSummary.categoryTotals.find((item) => item.category === category)?.amount || 0;
+      const configured = configuredBudgets.get(category) || 0;
+      const previousShare = previousSummary.expense > 0 ? previous / previousSummary.expense : 0;
+      const currentShare = summary.expense > 0 ? used / summary.expense : 0;
+      const share = Math.max(previousShare, currentShare);
+      const poolTarget = flexiblePool > 0 && share > 0 ? flexiblePool * share : 0;
+      const suggested =
+        configured > 0
+          ? configured
+          : previous > 0
+            ? Math.max(previous * (used > previous * 1.15 ? 0.9 : 1), poolTarget * 0.85)
+            : used > 0
+              ? used * 0.85
+              : 0;
+      const target = Math.max(0, Math.round(suggested));
+      const remaining = target - used;
+      const percent = target > 0 ? Math.round((used / target) * 100) : 0;
+      const level = remaining < 0 ? "risk" : percent >= 80 ? "watch" : "good";
+      const source = configured > 0 ? "手动预算" : previous > 0 ? "参考上月" : "按本月压降";
+      const action = remaining < 0
+        ? `已超 ${formatCurrency(Math.abs(remaining))}，本月暂停新增。`
+        : `剩余控制在 ${formatCurrency(remaining)} 内。`;
+      return { category, used, previous, target, remaining, percent, level, source, action };
+    })
+    .filter((item) => item.target > 0 || item.used > 0)
+    .sort((left, right) => {
+      const weight = { risk: 0, watch: 1, good: 2 };
+      return weight[left.level] - weight[right.level] || right.used - left.used;
+    })
+    .slice(0, 5);
+}
+
+function getBudgetPacePlan(summary) {
+  const days = getMonthDays(summary.month);
+  const todayKey = getDateKey(new Date());
+  const todayDay = todayKey.startsWith(summary.month) ? Number(todayKey.slice(8, 10)) : days.length;
+  const daysLeft = Math.max(days.length - todayDay + 1, 1);
+  const elapsedRate = days.length ? Math.round((todayDay / days.length) * 100) : 100;
+  const totalBudget = Number(summary.totalBudget || 0);
+  const usedRate = totalBudget > 0 ? Math.round((summary.expense / totalBudget) * 100) : 0;
+  const remainingBudget = Math.max(totalBudget - summary.expense, 0);
+  const dailyBudget = totalBudget > 0 ? remainingBudget / daysLeft : 0;
+  const paceGap = totalBudget > 0 ? usedRate - elapsedRate : 0;
+  const expectedSpend = totalBudget > 0 ? totalBudget * (elapsedRate / 100) : 0;
+  const paceAmount = summary.expense - expectedSpend;
+  const level = totalBudget <= 0 ? "watch" : summary.expense > totalBudget || paceGap > 15 ? "risk" : paceGap > 5 ? "watch" : paceGap < -12 ? "good" : "stable";
+  const label = totalBudget <= 0 ? "待设置" : level === "risk" ? "明显超前" : level === "watch" ? "略微超前" : level === "good" ? "节奏宽松" : "节奏正常";
+  const action =
+    totalBudget <= 0
+      ? "先设置总预算，才能判断本月消耗速度。"
+      : summary.expense > totalBudget
+        ? "预算已超，本月暂停非必要支出。"
+        : paceGap > 15
+          ? `比时间进度快 ${paceGap}%，优先压降最大支出分类。`
+          : paceGap > 5
+            ? `比时间进度快 ${paceGap}%，剩余日均控制在 ${formatCurrency(dailyBudget)} 内。`
+            : paceGap < -12
+              ? `比时间进度慢 ${Math.abs(paceGap)}%，可保持当前节奏。`
+              : `按当前节奏执行，日均不超过 ${formatCurrency(dailyBudget)}。`;
+  return { daysLeft, elapsedRate, usedRate, remainingBudget, dailyBudget, paceGap, paceAmount, expectedSpend, level, label, action };
+}
+
+function buildBillAnalysisComparison(data, summary) {
+  const previousMonth = getRelativeMonth(summary.month, -1);
+  const previousSummary = getMonthlyFinanceSummary(data, previousMonth);
+  const categoryChanges = summary.categoryTotals
+    .map((row) => {
+      const previous = previousSummary.categoryTotals.find((item) => item.category === row.category)?.amount || 0;
+      return { category: row.category, amount: row.amount, previous, change: row.amount - previous };
+    })
+    .sort((left, right) => Math.abs(right.change) - Math.abs(left.change));
+  const topChange = categoryChanges[0] || null;
+  const fixedPercent = summary.expense > 0 ? Math.round((summary.fixedExpense / summary.expense) * 100) : 0;
+  const variableExpense = Math.max(summary.expense - summary.fixedExpense, 0);
+  const variablePercent = summary.expense > 0 ? Math.round((variableExpense / summary.expense) * 100) : 0;
+  return { previousMonth, previousSummary, topChange, fixedPercent, variableExpense, variablePercent };
+}
+
+function getBillCategoryFlowRows(summary, limit = 8) {
+  return summary.categoryTotals.slice(0, limit).map((row, index) => {
+    const items = summary.expenseItems.filter((item) => (item.category || "未分类") === row.category);
+    const percent = summary.expense > 0 ? Math.round((row.amount / summary.expense) * 100) : 0;
+    const sample = items
+      .slice()
+      .sort((left, right) => Number(right.amount || 0) - Number(left.amount || 0))[0];
+    return { ...row, index, count: items.length, percent, sampleTitle: sample?.title || sample?.note || sample?.source || "暂无代表流水" };
+  });
+}
+
+function billAnalysisPanel(summary, data) {
+  const comparison = buildBillAnalysisComparison(data, summary);
   const metrics = [
     ["收入", formatCurrency(summary.income), `${summary.incomeItems.length} 笔`],
     ["支出", formatCurrency(summary.expense), `${summary.expenseItems.length} 笔`],
     ["结余", formatCurrency(summary.balance), summary.balance >= 0 ? "现金流为正" : "现金流为负"],
     ["支出率", summary.income > 0 ? `${Math.round(summary.expenseRate * 100)}%` : "缺少收入", "支出 / 收入"],
   ];
-  const flowRows = summary.categoryTotals.slice(0, 6).map((row) => {
-    const items = summary.expenseItems.filter((item) => (item.category || "未分类") === row.category);
-    const percent = summary.expense > 0 ? Math.round((row.amount / summary.expense) * 100) : 0;
-    const sample = items
-      .slice()
-      .sort((left, right) => Number(right.amount || 0) - Number(left.amount || 0))[0];
-    return { ...row, count: items.length, percent, sampleTitle: sample?.title || sample?.note || sample?.source || "暂无代表流水" };
-  });
+  const comparisonRows = [
+    ["较上月收入", summary.income - comparison.previousSummary.income],
+    ["较上月支出", summary.expense - comparison.previousSummary.expense],
+    ["较上月结余", summary.balance - comparison.previousSummary.balance],
+  ];
   return `
-    <section class="panel bill-decision-panel">
+    <section class="panel bill-decision-panel" data-bill-report-panel>
       <div class="panel-head">
         <h2>收支分析</h2>
         <span class="results-count">${escapeHtml(summary.month)}</span>
@@ -969,24 +1512,57 @@ function billAnalysisPanel(summary) {
       <div class="bill-metric-grid">
         ${metrics.map(([label, value, hint]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(hint)}</small></article>`).join("")}
       </div>
-      <div class="bill-category-list">
-        ${(summary.categoryTotals.slice(0, 4).map((row) => {
-          const percent = summary.expense > 0 ? Math.round((row.amount / summary.expense) * 100) : 0;
-          return `<div><span>${escapeHtml(row.category)}</span><i><b style="width:${percent}%"></b></i><strong>${percent}%</strong></div>`;
-        }).join("") || emptyState("暂无支出分类"))}
+      <div class="bill-analysis-compare">
+        ${comparisonRows.map(([label, value]) => `<article class="${value > 0 ? "is-up" : value < 0 ? "is-down" : ""}"><span>${escapeHtml(label)}</span><strong>${value >= 0 ? "+" : ""}${formatCurrency(value)}</strong><small>${escapeHtml(comparison.previousMonth)}</small></article>`).join("")}
+        <article>
+          <span>变化主因</span>
+          <strong>${comparison.topChange ? `${escapeHtml(comparison.topChange.category)} ${comparison.topChange.change >= 0 ? "+" : ""}${formatCurrency(comparison.topChange.change)}` : "暂无"}</strong>
+          <small>分类环比</small>
+        </article>
       </div>
-      <div class="bill-flow-list">
-        ${flowRows
+      <div class="bill-analysis-split">
+        <article><span>固定支出</span><strong>${formatCurrency(summary.fixedExpense)}</strong><i><b style="width:${comparison.fixedPercent}%"></b></i><small>${comparison.fixedPercent}%</small></article>
+        <article><span>可变生活</span><strong>${formatCurrency(comparison.variableExpense)}</strong><i><b style="width:${comparison.variablePercent}%"></b></i><small>${comparison.variablePercent}%</small></article>
+      </div>
+    </section>
+  `;
+}
+
+function billCategoryFlowPanel(summary) {
+  const rows = getBillCategoryFlowRows(summary, 8);
+  const topRows = rows.slice(0, 4);
+  const topCategory = rows[0];
+  const categoryCount = summary.categoryTotals.length;
+  return `
+    <section class="panel bill-category-flow-panel">
+      <div class="panel-head">
+        <h2>分类流向</h2>
+        <span class="results-count">${categoryCount ? `${categoryCount} 类 · ${escapeHtml(summary.month)}` : "暂无分类"}</span>
+      </div>
+      <div class="bill-category-flow-hero">
+        <article>
+          <span>最大流向</span>
+          <strong>${topCategory ? escapeHtml(topCategory.category) : "暂无支出"}</strong>
+          <small>${topCategory ? `${formatCurrency(topCategory.amount)} · ${topCategory.percent}%` : "导入或补录后生成"}</small>
+        </article>
+        <div class="bill-category-flow-stack" aria-label="分类流向占比">
+          ${topRows.map((row) => `<i class="bill-category-flow-stack__seg bill-category-flow-stack__seg--${row.index % 5}" style="width:${Math.max(row.percent, 4)}%" title="${escapeHtml(row.category)} ${row.percent}%"></i>`).join("")}
+        </div>
+      </div>
+      <div class="bill-flow-list bill-flow-list--interactive">
+        ${rows
           .map(
             (row) => `
-              <article>
+              <article class="bill-flow-row bill-flow-row--${row.index % 5}" data-open-bill-category="${escapeHtml(row.category)}" data-bill-category-month="${escapeHtml(summary.month)}" tabindex="0" role="button">
+                <b>${String(row.index + 1).padStart(2, "0")}</b>
                 <div>
                   <strong>${escapeHtml(row.category)}</strong>
                   <span>${escapeHtml(row.sampleTitle)} · ${row.count} 笔</span>
                 </div>
-                <i><b style="width:${row.percent}%"></b></i>
+                <i><u style="width:${row.percent}%"></u></i>
                 <em>${formatCurrency(row.amount)}</em>
                 <small>${row.percent}%</small>
+                <button class="bill-flow-row__trend" data-bill-trend-category-focus="${escapeHtml(row.category)}" data-bill-category-month="${escapeHtml(summary.month)}" type="button">趋势</button>
               </article>
             `,
           )
@@ -996,15 +1572,78 @@ function billAnalysisPanel(summary) {
   `;
 }
 
-function billRiskPanel(risks) {
+function billRiskPanel(risks, summary, data) {
+  const advice = buildMonthlySpendingAdvice(data, summary);
+  const hasActionableRisk = risks.some((risk) => risk.level !== "good");
+  const conclusion = hasActionableRisk ? "需要关注" : "整体可控";
+  const reserveText = summary.income > 0 ? formatCurrency(advice.suggestedReserve) : "待录入收入";
+  const primaryRisk = risks[0] || { level: "good", title: "暂无明显风险", text: "当前数据未触发高风险规则。", basis: "继续保持记录完整。", action: "月底保存复盘即可。" };
+  const secondaryRisks = risks.slice(1, 3);
   return `
     <section class="panel bill-decision-panel">
       <div class="panel-head">
         <h2>风险提醒</h2>
-        <span class="results-count">规则判断</span>
+        <span class="results-count">${escapeHtml(conclusion)} · 本月建议</span>
       </div>
-      <div class="bill-risk-list">
-        ${risks.map((risk) => `<article class="bill-risk-item bill-risk-item--${escapeHtml(risk.level)}"><strong>${escapeHtml(risk.title)}</strong><p>${escapeHtml(risk.text)}</p></article>`).join("")}
+      <div class="bill-risk-layout">
+        <article class="bill-risk-item bill-risk-item--primary bill-risk-item--${escapeHtml(primaryRisk.level)}">
+          <div class="bill-risk-item__summary">
+            <div class="bill-risk-item__head">
+              <strong>${escapeHtml(primaryRisk.title)}</strong>
+              <span>${primaryRisk.level === "risk" ? "高风险" : primaryRisk.level === "watch" ? "关注" : "正常"}</span>
+            </div>
+            <p>${escapeHtml(primaryRisk.text)}</p>
+          </div>
+          <dl>
+            <div><dt>依据</dt><dd>${escapeHtml(primaryRisk.basis || "暂无判断依据")}</dd></div>
+            <div><dt>动作</dt><dd>${escapeHtml(primaryRisk.action || "继续观察")}</dd></div>
+          </dl>
+        </article>
+        ${
+          secondaryRisks.length
+            ? `<div class="bill-risk-list bill-risk-list--compact">
+                ${secondaryRisks.map((risk) => `
+                  <article class="bill-risk-item bill-risk-item--${escapeHtml(risk.level)}">
+                    <div class="bill-risk-item__head">
+                      <strong>${escapeHtml(risk.title)}</strong>
+                      <span>${risk.level === "risk" ? "高风险" : risk.level === "watch" ? "关注" : "正常"}</span>
+                    </div>
+                    <p>${escapeHtml(risk.text)}</p>
+                  </article>
+                `).join("")}
+              </div>`
+            : ""
+        }
+      </div>
+      <div class="bill-risk-advice-grid">
+        <article>
+          <span>上月支出</span>
+          <strong>${formatCurrency(advice.previousSummary.expense)}</strong>
+          <small>${escapeHtml(advice.previousMonth)}</small>
+        </article>
+        <article>
+          <span>上月主项</span>
+          <strong>${escapeHtml(advice.topPrevious?.category || "暂无")}</strong>
+          <small>${advice.topPrevious ? formatCurrency(advice.topPrevious.amount) : "数据不足"}</small>
+        </article>
+        <article>
+          <span>本月余量</span>
+          <strong>${formatCurrency(advice.remainingTarget)}</strong>
+          <small>日均 ${formatCurrency(advice.dailyAllowance)}</small>
+        </article>
+        <article>
+          <span>建议储备</span>
+          <strong>${escapeHtml(reserveText)}</strong>
+          <small>优先留存</small>
+        </article>
+      </div>
+      <div class="bill-risk-focus">
+        ${advice.focusItems.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}
+      </div>
+      <div class="bill-risk-allocation">
+        <article><span>固定支出</span><strong>${formatCurrency(summary.fixedExpense)}</strong><em>先预留</em></article>
+        <article><span>可变生活</span><strong>${formatCurrency(advice.flexibleTarget)}</strong><em>按日控制</em></article>
+        <article><span>重点压降</span><strong>${escapeHtml(advice.avoidCategory?.category || "暂无")}</strong><em>${advice.avoidCategory ? "非必要先缓" : "继续记录"}</em></article>
       </div>
     </section>
   `;
@@ -1189,30 +1828,55 @@ function trendSeriesPoints(rows, series, scale) {
   });
 }
 
+function trendSeriesId(series) {
+  return `${series.category || series.key || series.label || "series"}`.replace(/[^\w\u4e00-\u9fa5-]+/g, "-");
+}
+
 function trendCurvePath(rows, series, scale) {
   const points = trendSeriesPoints(rows, series, scale);
   const d = buildSmoothTrendPath(points);
   const currentPoint = points[points.length - 1];
   const currentLabel = currentPoint ? `${series.label} · ${trendAxisLabel(currentPoint.row, currentPoint.row.scope)} · ${formatCurrency(currentPoint.value)}` : series.label;
+  const seriesId = trendSeriesId(series);
   return `
-    <path class="bill-trend-line ${series.className}" d="${d}"></path>
-    <path class="bill-trend-line-hit ${series.className}" d="${d}" data-bill-trend-tooltip="${escapeHtml(currentLabel)}"></path>
+    <path class="bill-trend-line ${series.className}" d="${d}" data-bill-trend-series="${escapeHtml(seriesId)}"></path>
+    <path class="bill-trend-line-hit ${series.className}" d="${d}" data-bill-trend-series="${escapeHtml(seriesId)}" data-bill-trend-tooltip="${escapeHtml(currentLabel)}"></path>
+  `;
+}
+
+function trendBudgetBand(rows, scale) {
+  const budgetRows = rows.filter((row) => Number(row.budget || 0) > 0);
+  if (!budgetRows.length) return "";
+  const latestBudget = Number(budgetRows[budgetRows.length - 1].budget || 0);
+  const warning = latestBudget * 0.8;
+  const yBudget = trendPoint(latestBudget, 0, 1, scale.max, scale.min, scale.width, scale.height, scale.padding).y;
+  const yWarning = trendPoint(warning, 0, 1, scale.max, scale.min, scale.width, scale.height, scale.padding).y;
+  const bandY = Math.min(yBudget, yWarning);
+  const bandHeight = Math.max(4, Math.abs(yWarning - yBudget));
+  return `
+    <g class="bill-trend-budget-band" aria-label="预算警戒带">
+      <rect x="${scale.padding}" y="${bandY}" width="${scale.width - scale.padding * 2}" height="${bandHeight}"></rect>
+      <line x1="${scale.padding}" y1="${yBudget}" x2="${scale.width - scale.padding}" y2="${yBudget}"></line>
+      <text x="${scale.width - scale.padding - 116}" y="${Math.max(scale.padding + 12, yBudget - 8)}">预算线 ${escapeHtml(formatCurrency(latestBudget))}</text>
+    </g>
   `;
 }
 
 function trendPointMarkers(rows, series, scale) {
+  const seriesId = trendSeriesId(series);
   return trendSeriesPoints(rows, series, scale)
     .map((point) => {
       const period = trendAxisLabel(point.row, point.row.scope);
       const value = formatCurrency(point.value);
       return `
-        <g class="bill-trend-point ${series.className}">
+        <g class="bill-trend-point ${series.className}" data-bill-trend-series="${escapeHtml(seriesId)}">
           <circle class="bill-trend-point__dot" cx="${point.x}" cy="${point.y}" r="2.4"></circle>
           <circle
             class="bill-trend-point__hit"
             cx="${point.x}"
             cy="${point.y}"
             r="10"
+            data-bill-trend-series="${escapeHtml(seriesId)}"
             data-bill-trend-tooltip="${escapeHtml(`${series.label} · ${period} · ${value}`)}"
           ></circle>
         </g>
@@ -1221,26 +1885,63 @@ function trendPointMarkers(rows, series, scale) {
     .join("");
 }
 
-function trendProblemMarkers(rows, mode, scale) {
+function getTrendProblems(rows, mode) {
   return rows
     .map((row, index) => {
-      if (mode === "budget" && row.budget > 0 && row.expense > row.budget) {
-        return { row, index, value: row.expense, label: `超预算 ${formatCurrency(row.expense - row.budget)}` };
+      if ((mode === "budget" || mode === "all") && row.budget > 0 && row.expense > row.budget) {
+        return {
+          row,
+          index,
+          value: row.expense,
+          label: `超预算 ${formatCurrency(row.expense - row.budget)}`,
+          type: "预算超支",
+          basis: `支出 ${formatCurrency(row.expense)} 高于预算 ${formatCurrency(row.budget)}。`,
+          action: "优先暂停非必要支出，并检查最大支出分类。",
+        };
       }
-      if (mode === "raw" && row.rawExpense > row.expense) {
-        return { row, index, value: row.rawExpense, label: `已剔除 ${formatCurrency(row.rawExpense - row.expense)}` };
+      if ((mode === "raw" || mode === "all") && row.rawExpense > row.expense) {
+        return {
+          row,
+          index,
+          value: row.rawExpense,
+          label: `已剔除 ${formatCurrency(row.rawExpense - row.expense)}`,
+          type: "原始差异",
+          basis: `原始支出 ${formatCurrency(row.rawExpense)}，过滤后支出 ${formatCurrency(row.expense)}。`,
+          action: "确认不计入分析的流水是否合理，避免误判生活支出。",
+        };
       }
-      if (mode === "cashflow" && row.balance < 0) {
-        return { row, index, value: row.balance, label: `负结余 ${formatCurrency(Math.abs(row.balance))}` };
+      if ((mode === "cashflow" || mode === "all") && row.balance < 0) {
+        return {
+          row,
+          index,
+          value: row.balance,
+          label: `负结余 ${formatCurrency(Math.abs(row.balance))}`,
+          type: "现金流风险",
+          basis: `收入 ${formatCurrency(row.income)}，支出 ${formatCurrency(row.expense)}，结余为负。`,
+          action: "先补录收入或压降当期支出，避免预算判断失真。",
+        };
       }
-      if (mode === "fixed" && row.expense > 0 && row.fixedExpense / row.expense >= 0.7) {
-        return { row, index, value: row.fixedExpense, label: `固定占比 ${Math.round((row.fixedExpense / row.expense) * 100)}%` };
+      if ((mode === "fixed" || mode === "all") && row.expense > 0 && row.fixedExpense / row.expense >= 0.7) {
+        const fixedRate = Math.round((row.fixedExpense / row.expense) * 100);
+        return {
+          row,
+          index,
+          value: row.fixedExpense,
+          label: `固定占比 ${fixedRate}%`,
+          type: "固定支出偏高",
+          basis: `固定支出 ${formatCurrency(row.fixedExpense)}，占总支出 ${fixedRate}%。`,
+          action: "优先预留固定支出，再安排可变生活费。",
+        };
       }
       return null;
     })
     .filter(Boolean)
     .sort((left, right) => Math.abs(right.value) - Math.abs(left.value))
-    .slice(0, 2)
+    .slice(0, 3);
+}
+
+function trendProblemMarkers(problems, rows, scale) {
+  return problems
     .map((problem) => {
       const point = trendPoint(problem.value, problem.index, rows.length, scale.max, scale.min, scale.width, scale.height, scale.padding);
       return `
@@ -1250,10 +1951,134 @@ function trendProblemMarkers(rows, mode, scale) {
           cy="${point.y}"
           r="11"
           data-bill-trend-tooltip="${escapeHtml(`${problem.label} · ${trendAxisLabel(problem.row, problem.row.scope)}`)}"
+          data-bill-trend-tooltip-lines="${escapeHtml(trendDetailLine("problem", "异常说明 " + problem.label))}"
+          data-bill-trend-problem
+          data-problem-title="${escapeHtml(problem.type || "趋势异常")}"
+          data-problem-label="${escapeHtml(problem.label)}"
+          data-problem-period="${escapeHtml(trendAxisLabel(problem.row, problem.row.scope))}"
+          data-problem-basis="${escapeHtml(problem.basis || "当前节点触发异常规则。")}"
+          data-problem-action="${escapeHtml(problem.action || "建议复核该时间点的账单。")}"
+          data-problem-income="${escapeHtml(formatCurrency(problem.row.income || 0))}"
+          data-problem-expense="${escapeHtml(formatCurrency(problem.row.expense || 0))}"
+          data-problem-balance="${escapeHtml(formatCurrency(problem.row.balance || 0))}"
         ></circle>
       `;
     })
     .join("");
+}
+
+function trendProblemSummary(problems) {
+  if (!problems.length) return "";
+  return `
+    <div class="bill-trend-problems" aria-label="趋势异常点说明">
+      ${problems
+        .map(
+          (problem) => `
+            <span>
+              <i></i>
+              <b>${escapeHtml(trendAxisLabel(problem.row, problem.row.scope))}</b>
+              <em>${escapeHtml(problem.label)}</em>
+            </span>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function trendSummaryMetrics(rows) {
+  const current = rows[rows.length - 1] || {};
+  const previous = rows[Math.max(rows.length - 2, 0)] || {};
+  const income = Number(current.income || 0);
+  const expense = Number(current.expense || 0);
+  const balance = Number(current.balance || 0);
+  const budget = Number(current.budget || 0);
+  const expenseDelta = expense - Number(previous.expense || 0);
+  const budgetRate = budget > 0 ? Math.round((expense / budget) * 100) : 0;
+  return [
+    { label: "收入", value: formatCurrency(income), hint: income - Number(previous.income || 0), tone: "income" },
+    { label: "支出", value: formatCurrency(expense), hint: expenseDelta, tone: "expense" },
+    { label: "结余", value: formatCurrency(balance), hint: balance >= 0 ? "现金流为正" : "现金流为负", tone: balance >= 0 ? "good" : "risk" },
+    { label: "预算", value: budget ? `${budgetRate}%` : "未设", hint: budget ? `${formatCurrency(expense)} / ${formatCurrency(budget)}` : "暂无预算线", tone: budgetRate >= 100 ? "risk" : budgetRate >= 80 ? "watch" : "good" },
+  ];
+}
+
+function trendSummaryStrip(rows) {
+  const metrics = trendSummaryMetrics(rows);
+  return `
+    <div class="bill-trend-summary">
+      ${metrics
+        .map((item) => {
+          const hint = typeof item.hint === "number" ? `${item.hint >= 0 ? "+" : ""}${formatCurrency(item.hint)}` : item.hint;
+          return `<article class="bill-trend-summary__item bill-trend-summary__item--${escapeHtml(item.tone)}"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(item.value)}</strong><small>${escapeHtml(hint)}</small></article>`;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function trendEndpointLabels(rows, series, scale) {
+  const labelGap = 15;
+  const topLimit = scale.padding + 8;
+  const bottomLimit = scale.height - scale.padding - 8;
+  const rawLabels = series
+    .map((item) => {
+      const points = trendSeriesPoints(rows, item, scale);
+      const point = points[points.length - 1];
+      return point ? { item, point, value: trendValue(point.row, item) } : null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => Math.abs(right.value) - Math.abs(left.value))
+    .slice(0, 6);
+  const visible = rawLabels
+    .sort((left, right) => left.point.y - right.point.y)
+    .map((label, index, labels) => {
+      const previousY = index ? labels[index - 1].labelY : topLimit - labelGap;
+      const labelY = Math.min(bottomLimit, Math.max(label.point.y, previousY + labelGap));
+      label.labelY = labelY;
+      return label;
+    });
+  for (let index = visible.length - 2; index >= 0; index -= 1) {
+    const nextY = visible[index + 1]?.labelY ?? bottomLimit;
+    visible[index].labelY = Math.min(visible[index].labelY, nextY - labelGap);
+  }
+  visible.forEach((label) => {
+    label.labelY = Math.min(bottomLimit, Math.max(topLimit, label.labelY));
+  });
+  return `
+    <g class="bill-trend-end-labels">
+      ${visible
+        .map(({ item, point, labelY }) => {
+          const x = Math.min(scale.width - 132, Math.max(scale.padding + 2, point.x + 7));
+          const y = labelY || Math.min(scale.height - scale.padding - 6, Math.max(scale.padding + 8, point.y));
+          return `
+            <g class="${escapeHtml(item.className)}" data-bill-trend-series="${escapeHtml(trendSeriesId(item))}" transform="translate(${x} ${y})">
+              <text>${escapeHtml(item.label)} ${escapeHtml(formatCurrency(point.value))}</text>
+            </g>
+          `;
+        })
+        .join("")}
+    </g>
+  `;
+}
+
+function trendInsights(rows, problems) {
+  if (!rows.length) return "";
+  const current = rows[rows.length - 1];
+  const first = rows[0];
+  const expenseChange = Number(current.expense || 0) - Number(first.expense || 0);
+  const topCategory = Object.entries(current.categories || {}).sort((left, right) => Number(right[1] || 0) - Number(left[1] || 0))[0];
+  const insights = [
+    expenseChange > 0 ? `本期支出较起点增加 ${formatCurrency(expenseChange)}，需要关注后续节奏。` : `本期支出较起点减少 ${formatCurrency(Math.abs(expenseChange))}，控制效果较好。`,
+    current.budget > 0 ? `当前预算使用 ${Math.round((Number(current.expense || 0) / Math.max(Number(current.budget || 0), 1)) * 100)}%，可作为后续消费上限参照。` : "当前缺少预算参照，建议先设置总预算线。",
+    topCategory ? `当前最大流向是「${topCategory[0]}」，金额 ${formatCurrency(topCategory[1])}。` : "当前区间没有明显分类流向。",
+    problems[0] ? `异常点：${problems[0].label}。` : "当前区间未触发明显异常点。",
+  ].slice(0, 4);
+  return `
+    <div class="bill-trend-insights">
+      ${insights.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}
+    </div>
+  `;
 }
 
 function trendAxisLabel(row, scope) {
@@ -1263,19 +2088,73 @@ function trendAxisLabel(row, scope) {
   return `${row.label}月`;
 }
 
+function trendDetailLine(type, text) {
+  return `${type}|${text}`;
+}
+
+function trendDetailType(series) {
+  if (series.category) {
+    if (series.className?.includes("category-a")) return "category-a";
+    if (series.className?.includes("category-b")) return "category-b";
+    if (series.className?.includes("category-c")) return "category-c";
+    return "category";
+  }
+  return series.key || "default";
+}
+
+function trendCursorDetail(row, mode, series) {
+  return series.map((item) => trendDetailLine(trendDetailType(item), `${item.label} ${formatCurrency(trendValue(row, item))}`));
+}
+
+function trendCursorTargets(rows, series, scale, mode, scope) {
+  const divisor = Math.max(rows.length - 1, 1);
+  const plotWidth = scale.width - scale.padding * 2;
+  const bandWidth = rows.length > 1 ? plotWidth / divisor : plotWidth;
+  return `
+    <line class="bill-trend-cursor-line" x1="${scale.padding}" y1="${scale.padding}" x2="${scale.padding}" y2="${scale.height - scale.padding}" hidden></line>
+    <g class="bill-trend-cursor-targets">
+      ${rows
+        .map((row, index) => {
+          const x = Math.round(scale.padding + (index * plotWidth) / divisor);
+          const startX = Math.max(scale.padding, x - bandWidth / 2);
+          const endX = Math.min(scale.width - scale.padding, x + bandWidth / 2);
+          const title = `${trendAxisLabel(row, scope)} · ${row.detail || row.month || row.key}`;
+          const lines = trendCursorDetail(row, mode, series).join("\n");
+          return `
+            <rect
+              x="${Math.round(startX)}"
+              y="${scale.padding}"
+              width="${Math.max(8, Math.round(endX - startX))}"
+              height="${scale.height - scale.padding * 2}"
+              data-bill-trend-cursor
+              data-bill-trend-cursor-x="${x}"
+              data-bill-trend-tooltip="${escapeHtml(title)}"
+              data-bill-trend-tooltip-lines="${escapeHtml(lines)}"
+            ></rect>
+          `;
+        })
+        .join("")}
+    </g>
+  `;
+}
+
 function trendAxisLabels(rows, scale, scope, activeTrendKey) {
   const divisor = Math.max(rows.length - 1, 1);
+  const dayStep = rows.length <= 16 ? 1 : rows.length <= 24 ? 2 : 5;
+  const axisY = scale.height - scale.padding;
+  const tickEndY = axisY + 5;
+  const labelY = Math.min(scale.height - 4, axisY + 16);
   return `
     <g class="bill-trend-axis-labels">
       ${rows
         .map((row, index) => {
           const x = Math.round(scale.padding + (index * (scale.width - scale.padding * 2)) / divisor);
           const activeClass = row.key === activeTrendKey ? "is-active" : "";
-          const shouldShowLabel = scope !== "day" || index === 0 || index === rows.length - 1 || row.key === activeTrendKey || Number(row.label) % 5 === 0;
+          const shouldShowLabel = scope !== "day" || index === 0 || index === rows.length - 1 || row.key === activeTrendKey || index % dayStep === 0;
           return `
             <g class="${activeClass}" transform="translate(${x} 0)">
-              <line x1="0" y1="183" x2="0" y2="188"></line>
-              ${shouldShowLabel ? `<text x="0" y="202">${escapeHtml(trendAxisLabel(row, scope))}</text>` : ""}
+              <line x1="0" y1="${axisY - 3}" x2="0" y2="${tickEndY}"></line>
+              ${shouldShowLabel ? `<text x="0" y="${labelY}">${escapeHtml(trendAxisLabel(row, scope))}</text>` : ""}
             </g>
           `;
         })
@@ -1309,6 +2188,44 @@ function getTopTrendCategories(rows) {
     }));
 }
 
+function getTrendCategoryOptions(rows) {
+  return Object.entries(
+    rows.reduce((map, row) => {
+      Object.entries(row.categories || {}).forEach(([category, amount]) => {
+        map[category] = (map[category] || 0) + Number(amount || 0);
+      });
+      return map;
+    }, {}),
+  )
+    .sort((left, right) => right[1] - left[1])
+    .map(([category, amount]) => ({ category, amount }));
+}
+
+function buildTrendCategorySeries(rows, selectedCategories = []) {
+  const options = getTrendCategoryOptions(rows);
+  const available = new Set(options.map((item) => item.category));
+  const selected = (Array.isArray(selectedCategories) ? selectedCategories : []).filter((category) => available.has(category)).slice(0, 3);
+  const categories = selected.length ? selected : options.slice(0, 3).map((item) => item.category);
+  return categories.map((category, index) => ({
+    category,
+    label: category,
+    className: ["bill-trend-line--category-a", "bill-trend-line--category-b", "bill-trend-line--category-c"][index],
+  }));
+}
+
+function trendCategorySelector(options, activeCategories) {
+  if (!options.length) return "";
+  const activeSet = new Set(activeCategories);
+  return `
+    <div class="bill-trend-category-picker" aria-label="分类曲线选择">
+      ${options.slice(0, 10).map((item) => {
+        const active = activeSet.has(item.category);
+        return `<button class="${active ? "is-active" : ""}" data-bill-trend-category-toggle="${escapeHtml(item.category)}" type="button"><span>${escapeHtml(item.category)}</span><em>${formatCurrency(item.amount)}</em></button>`;
+      }).join("")}
+    </div>
+  `;
+}
+
 function normalizeTrendRange(value, scope = "month") {
   const options = trendRangeOptions(scope);
   if (!options.length) return 0;
@@ -1316,12 +2233,31 @@ function normalizeTrendRange(value, scope = "month") {
   return options.includes(range) ? range : options[1] || options[0];
 }
 
-function billTrendPanel(data, activeMonth, mode = "cashflow", range = 6, scope = "month") {
+function normalizeTrendZoom(start = 0, end = 100) {
+  const normalizedStart = Math.min(Math.max(Number(start) || 0, 0), 96);
+  const normalizedEnd = Math.min(Math.max(Number(end) || 100, normalizedStart + 4), 100);
+  return { start: normalizedStart, end: normalizedEnd };
+}
+
+function sliceTrendRows(rows, start = 0, end = 100) {
+  if (rows.length <= 2) return rows;
+  const zoom = normalizeTrendZoom(start, end);
+  const startIndex = Math.floor((zoom.start / 100) * rows.length);
+  const endIndex = Math.ceil((zoom.end / 100) * rows.length);
+  return rows.slice(startIndex, Math.max(startIndex + 2, endIndex));
+}
+
+function billTrendPanel(data, activeMonth, mode = "cashflow", range = 6, scope = "month", zoomStart = 0, zoomEnd = 100, hiddenSeries = [], selectedCategories = []) {
   const normalizedMode = ["cashflow", "budget", "fixed", "raw", "category"].includes(mode) ? mode : "cashflow";
   const normalizedScope = normalizeTrendScope(scope);
   const normalizedRange = normalizeTrendRange(range, normalizedScope);
-  const rows = getBillTrendRows(data, activeMonth, normalizedScope, normalizedRange);
-  const categorySeries = getTopTrendCategories(rows);
+  const allRows = getBillTrendRows(data, activeMonth, normalizedScope, normalizedRange);
+  const zoom = normalizeTrendZoom(zoomStart, zoomEnd);
+  const rows = sliceTrendRows(allRows, zoom.start, zoom.end);
+  const categoryOptions = getTrendCategoryOptions(allRows);
+  const selectedCategoryNames = (Array.isArray(selectedCategories) ? selectedCategories : []).filter((category) => categoryOptions.some((item) => item.category === category)).slice(0, 3);
+  const categorySeries = buildTrendCategorySeries(allRows, selectedCategoryNames);
+  const activeCategoryNames = categorySeries.map((item) => item.category);
   const categoryFallback = [{ key: "expense", label: "暂无分类，显示总支出", className: "bill-trend-line--expense" }];
   const seriesByMode = {
     cashflow: [
@@ -1343,14 +2279,30 @@ function billTrendPanel(data, activeMonth, mode = "cashflow", range = 6, scope =
     ],
     category: categorySeries.length ? categorySeries : categoryFallback,
   };
-  const series = seriesByMode[normalizedMode];
+  const allSeries = [
+    ...seriesByMode.cashflow,
+    ...seriesByMode.budget,
+    ...seriesByMode.fixed,
+    ...seriesByMode.raw,
+    ...seriesByMode.category,
+  ].filter((item, index, source) => {
+    const id = trendSeriesId(item);
+    return source.findIndex((row) => trendSeriesId(row) === id) === index;
+  });
+  const coreTrendSeriesIds = new Set(["income", "expense", "balance"]);
+  const defaultHiddenSeries = allSeries.map((item) => trendSeriesId(item)).filter((id) => !coreTrendSeriesIds.has(id));
+  const hiddenSet = new Set(Array.isArray(hiddenSeries) && hiddenSeries.length ? hiddenSeries : defaultHiddenSeries);
+  const visibleSeries = allSeries.filter((item) => !hiddenSet.has(trendSeriesId(item)));
+  const series = visibleSeries.length ? visibleSeries : allSeries;
   const values = rows.flatMap((row) => series.map((item) => trendValue(row, item)));
-  const minValue = normalizedMode === "cashflow" ? Math.min(0, ...values) : 0;
+  const minValue = Math.min(0, ...values);
   const maxValue = Math.max(1, ...values);
-  const scale = { min: minValue, max: maxValue, width: 620, height: 210, padding: 24 };
+  const scale = { min: minValue, max: maxValue, width: 920, height: 210, padding: 20 };
   const scopeLabel = { day: `${activeMonth} · 按日`, week: `${activeMonth} · 按周`, month: `近 ${normalizedRange} 月`, year: `近 ${normalizedRange} 年` }[normalizedScope];
   const rangeOptions = trendRangeOptions(normalizedScope);
   const activeTrendKey = getActiveTrendKey(activeMonth, normalizedScope);
+  const problems = getTrendProblems(rows, "all");
+  const canPanTrend = zoom.end - zoom.start < 99;
   return `
     <section class="panel bill-trend-panel">
       <div class="panel-head">
@@ -1369,17 +2321,6 @@ function billTrendPanel(data, activeMonth, mode = "cashflow", range = 6, scope =
               .map((item) => `<button class="${normalizedScope === item[0] ? "is-active" : ""}" data-bill-trend-scope="${item[0]}" type="button">${item[1]}</button>`)
               .join("")}
           </div>
-          <div class="bill-trend-tabs">
-            ${[
-              ["cashflow", "收入支出"],
-              ["budget", "预算对比"],
-              ["fixed", "固定支出"],
-              ["raw", "原始对比"],
-              ["category", "分类对比"],
-            ]
-              .map((item) => `<button class="${normalizedMode === item[0] ? "is-active" : ""}" data-bill-trend-mode="${item[0]}" type="button">${item[1]}</button>`)
-              .join("")}
-          </div>
           ${
             rangeOptions.length
               ? `<div class="bill-trend-tabs bill-trend-tabs--range">
@@ -1389,48 +2330,156 @@ function billTrendPanel(data, activeMonth, mode = "cashflow", range = 6, scope =
           }
         </div>
       </div>
-      <div class="bill-trend-chart">
+      ${trendSummaryStrip(rows)}
+      <div class="bill-trend-chart ${canPanTrend ? "is-pan-ready" : ""}">
         <svg viewBox="0 0 ${scale.width} ${scale.height}" role="img" aria-label="收支趋势折线图">
           <g class="bill-trend-grid">
-            <line x1="24" y1="24" x2="24" y2="186"></line>
-            <line x1="24" y1="186" x2="596" y2="186"></line>
-            <line x1="24" y1="105" x2="596" y2="105"></line>
+            <line x1="${scale.padding}" y1="${scale.padding}" x2="${scale.padding}" y2="${scale.height - scale.padding}"></line>
+            <line x1="${scale.padding}" y1="${scale.height - scale.padding}" x2="${scale.width - scale.padding}" y2="${scale.height - scale.padding}"></line>
+            <line x1="${scale.padding}" y1="${Math.round(scale.height / 2)}" x2="${scale.width - scale.padding}" y2="${Math.round(scale.height / 2)}"></line>
           </g>
-          ${series.map((item) => trendCurvePath(rows, item, scale)).join("")}
-          <g class="bill-trend-point-layer">
-            ${series.map((item) => trendPointMarkers(rows, item, scale)).join("")}
-            ${trendProblemMarkers(rows, normalizedMode, scale)}
+          ${trendBudgetBand(rows, scale)}
+          <g class="bill-trend-zoom-layer">
+            ${series.map((item) => trendCurvePath(rows, item, scale)).join("")}
+            <g class="bill-trend-point-layer">
+              ${series.map((item) => trendPointMarkers(rows, item, scale)).join("")}
+              ${trendProblemMarkers(problems, rows, scale)}
+            </g>
+            ${trendAxisLabels(rows, scale, normalizedScope, activeTrendKey)}
+            ${trendEndpointLabels(rows, series, scale)}
           </g>
-          ${trendAxisLabels(rows, scale, normalizedScope, activeTrendKey)}
+          <rect class="bill-trend-selection" x="0" y="${scale.padding}" width="0" height="${scale.height - scale.padding * 2}" hidden></rect>
+          ${trendCursorTargets(rows, series, scale, normalizedMode, normalizedScope)}
         </svg>
+        <div class="bill-trend-datazoom" aria-label="趋势范围缩放">
+          <span>${escapeHtml(trendAxisLabel(rows[0] || allRows[0] || {}, normalizedScope))}</span>
+          <div class="bill-trend-datazoom__range">
+            <input type="range" min="0" max="96" value="${zoom.start}" data-bill-trend-zoom-start aria-label="范围起点" />
+            <input type="range" min="4" max="100" value="${zoom.end}" data-bill-trend-zoom-end aria-label="范围终点" />
+          </div>
+          <span>${escapeHtml(trendAxisLabel(rows[rows.length - 1] || allRows[allRows.length - 1] || {}, normalizedScope))}</span>
+        </div>
+        ${trendProblemSummary(problems)}
       </div>
+      ${trendInsights(rows, problems)}
+      ${trendCategorySelector(categoryOptions, activeCategoryNames)}
       <div class="bill-trend-legend">
-        ${series.map((item) => `<span class="${escapeHtml(item.className)}"><i></i>${escapeHtml(item.label)}</span>`).join("")}
+        ${allSeries
+          .map((item) => {
+            const seriesId = trendSeriesId(item);
+            const isHidden = hiddenSet.has(seriesId) && allSeries.length > 1;
+            return `<button class="${escapeHtml(item.className)} ${isHidden ? "is-muted" : ""}" data-bill-trend-series-toggle="${escapeHtml(seriesId)}" type="button"><i></i>${escapeHtml(item.label)}</button>`;
+          })
+          .join("")}
       </div>
     </section>
   `;
 }
 
-function billBudgetPanel(summary) {
+function billBudgetPanel(summary, commitments, data) {
+  const dynamicPlan = getDynamicBudgetPlan(summary, commitments);
+  const suggestedRows = buildCategoryBudgetSuggestions(data, summary, dynamicPlan);
+  const pacePlan = getBudgetPacePlan(summary);
   const totalUsed = summary.totalBudget > 0 ? Math.round((summary.expense / summary.totalBudget) * 100) : 0;
   const categoryRows = (summary.categoryBudgets || []).slice(0, 5).map((budget) => {
     const used = summary.categoryTotals.find((item) => item.category === budget.category)?.amount || 0;
     const percent = Number(budget.amount || 0) > 0 ? Math.round((used / Number(budget.amount || 0)) * 100) : 0;
-    return { category: budget.category, used, budget: Number(budget.amount || 0), percent };
+    const remaining = Math.max(Number(budget.amount || 0) - used, 0);
+    const level = percent >= 100 ? "risk" : percent >= 80 ? "watch" : "good";
+    return { category: budget.category, used, budget: Number(budget.amount || 0), percent, remaining, level };
+  }).sort((left, right) => {
+    const weight = { risk: 0, watch: 1, good: 2 };
+    return weight[left.level] - weight[right.level] || right.percent - left.percent;
   });
+  const suggestionText = suggestedRows.map((row) => `${row.category} ${Math.round(row.target)}`).join("\n");
   return `
     <section class="panel bill-decision-panel">
       <div class="panel-head">
         <h2>预算目标</h2>
-        <span class="results-count">${summary.totalBudget ? `${totalUsed}% 已用` : "未设置总预算"}</span>
+        <span class="results-count">${summary.totalBudget ? `${totalUsed}% 已用 · ${escapeHtml(pacePlan.label)}` : "未设置总预算"}</span>
       </div>
       <div class="bill-budget-total">
         <span>本月总预算</span>
         <strong>${formatCurrency(summary.expense)} / ${formatCurrency(summary.totalBudget)}</strong>
         <i><b style="width:${Math.min(totalUsed, 100)}%"></b></i>
       </div>
+      <form class="bill-budget-form" id="budgetForm">
+        <label>
+          月份
+          <input name="month" type="month" value="${escapeHtml(summary.month)}" />
+        </label>
+        <label>
+          本月总预算
+          <input name="totalBudget" type="number" min="0" step="0.01" value="${escapeHtml(String(summary.totalBudget || ""))}" placeholder="例如 3000" />
+        </label>
+        <label class="bill-budget-form__categories">
+          分类预算
+          <textarea name="categoryBudgets" rows="2" placeholder="餐饮 1200&#10;交通 300">${escapeHtml((summary.categoryBudgets || []).map((item) => `${item.category} ${item.amount}`).join("\n"))}</textarea>
+        </label>
+        <button class="primary-button" type="submit">保存预算</button>
+      </form>
+      <div class="bill-dynamic-budget bill-dynamic-budget--${escapeHtml(dynamicPlan.level)}">
+        <article>
+          <span>动态可支配</span>
+          <strong>${formatCurrency(dynamicPlan.freeRemaining)}</strong>
+          <small>日均 ${formatCurrency(dynamicPlan.dailyFree)}</small>
+        </article>
+        <div>
+          <span>计算口径</span>
+          <p>收入 ${formatCurrency(summary.income)} - 固定 ${formatCurrency(dynamicPlan.fixedReserve)} - 未来预留 ${formatCurrency(dynamicPlan.plannedReserve)} - 可变已花 ${formatCurrency(dynamicPlan.variableSpent)}</p>
+        </div>
+        <article>
+          <span>自由额度</span>
+          <strong>${formatCurrency(dynamicPlan.freeLimit)}</strong>
+          <small>剩余 ${dynamicPlan.daysLeft} 天</small>
+        </article>
+      </div>
+      <div class="bill-budget-pacing">
+        <article class="bill-budget-pacing--${escapeHtml(pacePlan.level)}"><span>预算节奏</span><strong>${escapeHtml(pacePlan.label)}</strong><small>时间 ${pacePlan.elapsedRate}% / 使用 ${pacePlan.usedRate}%</small></article>
+        <article><span>偏差金额</span><strong>${pacePlan.paceAmount >= 0 ? "+" : ""}${formatCurrency(pacePlan.paceAmount)}</strong><small>相对时间预算</small></article>
+        <article><span>日均额度</span><strong>${formatCurrency(pacePlan.dailyBudget)}</strong><small>剩余 ${pacePlan.daysLeft} 天</small></article>
+      </div>
+      <div class="bill-budget-pace-detail bill-budget-pace-detail--${escapeHtml(pacePlan.level)}">
+        <span>节奏依据</span>
+        <p>${escapeHtml(pacePlan.action)}</p>
+        <em>当前已花 ${formatCurrency(summary.expense)}，按时间进度应花约 ${formatCurrency(pacePlan.expectedSpend)}，剩余预算 ${formatCurrency(pacePlan.remainingBudget)}。</em>
+      </div>
       <div class="bill-budget-list">
-        ${categoryRows.map((row) => `<article><span>${escapeHtml(row.category)}</span><strong>${formatCurrency(row.used)} / ${formatCurrency(row.budget)}</strong><em>${row.percent}%</em></article>`).join("") || emptyState("可在设置预算后查看分类目标")}
+        ${categoryRows.map((row) => `<article class="bill-budget-row bill-budget-row--${escapeHtml(row.level)}"><span>${escapeHtml(row.category)}</span><i><b style="width:${Math.min(row.percent, 100)}%"></b></i><strong>${formatCurrency(row.used)} / ${formatCurrency(row.budget)}</strong><em>余 ${formatCurrency(row.remaining)} · ${row.percent}%</em></article>`).join("") || emptyState("可在设置预算后查看分类目标")}
+      </div>
+      <div class="bill-budget-suggestions">
+        <div class="bill-budget-subhead">
+          <div>
+            <strong>分类预算建议</strong>
+            <span>${suggestedRows.length ? "自动参考上月与本月节奏" : "暂无可建议分类"}</span>
+          </div>
+          ${suggestedRows.length ? `<button class="ghost-button" data-apply-budget-suggestions="${escapeHtml(suggestionText)}" type="button">应用建议</button>` : ""}
+        </div>
+        ${suggestedRows.map((row) => `
+          <article class="bill-budget-suggestion bill-budget-suggestion--${escapeHtml(row.level)}">
+            <div class="bill-budget-suggestion__head">
+              <div>
+                <span>${escapeHtml(row.category)}</span>
+                <strong>${formatCurrency(row.target)}</strong>
+              </div>
+              <em>${row.remaining < 0 ? `超 ${formatCurrency(Math.abs(row.remaining))}` : `余 ${formatCurrency(row.remaining)}`}</em>
+            </div>
+            <div class="bill-budget-suggestion__progress">
+              <i><b style="width:${Math.min(row.percent, 100)}%"></b></i>
+              <small>${Math.max(row.percent, 0)}% 已用 · 当前 ${formatCurrency(row.used)}</small>
+            </div>
+            <div class="bill-budget-suggestion__meta">
+              <section>
+                <span>控制动作</span>
+                <p>${escapeHtml(row.action)}</p>
+              </section>
+              <section>
+                <span>建议依据</span>
+                <p>${escapeHtml(row.source)} · 参考 ${formatCurrency(row.previous || row.target)}</p>
+              </section>
+            </div>
+          </article>
+        `).join("") || emptyState("本月暂无支出分类，导入后生成建议")}
       </div>
     </section>
   `;
@@ -1440,6 +2489,8 @@ function billFuturePlanPanel(summary, commitments) {
   const futureExpense = commitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const reserve = Math.max(summary.balance, 0);
   const today = new Date();
+  const fundingGap = Math.max(futureExpense - reserve, 0);
+  const monthlyReserve = futureExpense > 0 ? (fundingGap > 0 ? fundingGap / 3 : futureExpense / 3) : 0;
   const controlRows = commitments
     .map((item) => {
       const amount = Number(item.amount || 0);
@@ -1448,6 +2499,7 @@ function billFuturePlanPanel(summary, commitments) {
       const dueDays = dueTime ? Math.ceil((dueTime - today) / 86400000) : 999;
       const gap = Math.max(amount - reserve, 0);
       const pressure = reserve > 0 ? amount / reserve : amount > 0 ? 99 : 0;
+      const monthlySave = dueDays > 0 && dueDays < 999 ? amount / Math.max(Math.ceil(dueDays / 30), 1) : amount / 3;
       const reasons = [];
       if (gap > 0) reasons.push(`资金缺口 ${formatCurrency(gap)}`);
       if (item.priority === "高") reasons.push("高优先级");
@@ -1463,7 +2515,7 @@ function billFuturePlanPanel(summary, commitments) {
         : dueDays <= 30
           ? "临近发生，建议锁定资金来源。"
           : "可控，按计划跟踪即可。";
-      return { ...item, amount, dueDate, dueDays, gap, level, action, reasons: reasons.length ? reasons : ["未触发风险规则"] };
+      return { ...item, amount, dueDate, dueDays, gap, monthlySave, level, action, reasons: reasons.length ? reasons : ["未触发风险规则"] };
     })
     .sort((left, right) => {
       const levelWeight = { risk: 0, watch: 1, good: 2 };
@@ -1471,6 +2523,7 @@ function billFuturePlanPanel(summary, commitments) {
     })
     .slice(0, 5);
   const riskCount = controlRows.filter((item) => item.level === "risk").length;
+  const nearestPlan = controlRows.find((item) => item.dueDays < 999);
   return `
     <section class="panel bill-decision-panel">
       <div class="panel-head">
@@ -1480,21 +2533,36 @@ function billFuturePlanPanel(summary, commitments) {
       <div class="bill-future-control-summary">
         <article><span>可用结余</span><strong>${formatCurrency(reserve)}</strong></article>
         <article><span>计划压力</span><strong>${formatCurrency(futureExpense)}</strong></article>
+        <article><span>资金缺口</span><strong>${formatCurrency(fundingGap)}</strong></article>
+        <article><span>月储备建议</span><strong>${formatCurrency(monthlyReserve)}</strong></article>
+        <article><span>最近计划</span><strong>${nearestPlan ? `${Math.max(nearestPlan.dueDays, 0)} 天` : "未排期"}</strong></article>
         <article><span>控制目标</span><strong>${futureExpense > reserve ? "先补缺口" : "按期准备"}</strong></article>
+      </div>
+      <div class="bill-future-funding">
+        <span>资金安排</span>
+        <strong>${fundingGap > 0 ? `未来 3 个月建议每月预留 ${formatCurrency(monthlyReserve)}，优先覆盖高风险计划。` : "当前结余可覆盖已知计划，继续按期准备即可。"}</strong>
       </div>
       <div class="bill-future-list">
         ${controlRows.map((item) => `
           <article class="bill-future-item bill-future-item--${escapeHtml(item.level)}">
-            <div>
-              <strong>${escapeHtml(item.title || "未命名计划")}</strong>
-              <span>${escapeHtml(item.dueDate || "未设置日期")} · ${escapeHtml(item.planType || "计划")} · ${item.dueDays < 999 ? `${Math.max(item.dueDays, 0)} 天内` : "未排期"}</span>
-              <div class="bill-future-reasons">
-                ${item.reasons.map((reason) => `<small>${escapeHtml(reason)}</small>`).join("")}
+            <div class="bill-future-card__head">
+              <div>
+                <strong>${escapeHtml(item.title || "未命名计划")}</strong>
+                <span>${escapeHtml(item.dueDate || "未设置日期")} · ${escapeHtml(item.planType || "计划")}</span>
               </div>
+              <b>${item.level === "risk" ? "高风险" : item.level === "watch" ? "关注" : "可控"}</b>
             </div>
-            <em>${formatCurrency(item.amount)}</em>
-            <p>${escapeHtml(item.action)}</p>
-            ${item.source === "plan" ? `<button class="ghost-button" data-future-plan-status="${escapeHtml(item.id)}" data-next-status="${item.status === "已准备" ? "计划中" : "已准备"}" type="button">${item.status === "已准备" ? "转计划" : "已准备"}</button><button class="ghost-button danger-button" data-delete-future-plan="${escapeHtml(item.id)}" type="button">删除</button>` : `<span class="tag">订阅</span>`}
+            <div class="bill-future-card__body">
+              <em>${formatCurrency(item.amount)}</em>
+              <p>${escapeHtml(item.action)}<small>月储备 ${formatCurrency(item.monthlySave)}</small></p>
+            </div>
+            <div class="bill-future-reasons">
+              ${item.reasons.map((reason) => `<small>${escapeHtml(reason)}</small>`).join("")}
+              <small>${item.dueDays < 999 ? `${Math.max(item.dueDays, 0)} 天内` : "未排期"}</small>
+            </div>
+            <div class="bill-future-card__actions">
+              ${item.source === "plan" ? `<button class="ghost-button" data-future-plan-status="${escapeHtml(item.id)}" data-next-status="${item.status === "已准备" ? "计划中" : "已准备"}" type="button">${item.status === "已准备" ? "转计划" : "已准备"}</button><button class="ghost-button danger-button" data-delete-future-plan="${escapeHtml(item.id)}" type="button">删除</button>` : `<span class="tag">订阅</span>`}
+            </div>
           </article>
         `).join("") || emptyState("暂无未来计划，建议录入保险、学费、旅行、大件消费等")}
       </div>
@@ -1502,66 +2570,234 @@ function billFuturePlanPanel(summary, commitments) {
   `;
 }
 
-function billMonthlyReviewPanel(summary, risks) {
+function buildMonthlyReviewInsights(summary, risks) {
   const topCategory = summary.categoryTotals[0];
-  const reviewText = summary.balance < 0 ? "现金流为负，优先处理风险提醒。" : summary.income <= 0 ? "缺少收入数据，先补录工资。" : "现金流为正，继续观察预算和未来计划。";
+  const riskCount = risks.filter((item) => item.level === "risk").length;
+  const watchCount = risks.filter((item) => item.level === "watch").length;
+  const budgetUsed = summary.totalBudget > 0 ? summary.expense / summary.totalBudget : 0;
+  let score = 100;
+  if (summary.income <= 0) score -= 25;
+  if (summary.balance < 0) score -= 25;
+  if (summary.expenseRate >= 0.9) score -= 18;
+  if (summary.fixedRate >= 0.4) score -= 10;
+  if (budgetUsed >= 1) score -= 16;
+  else if (budgetUsed >= 0.8) score -= 8;
+  score -= riskCount * 8 + watchCount * 4;
+  score = Math.min(100, Math.max(0, Math.round(score)));
+  const grade = score >= 85 ? "健康" : score >= 70 ? "可控" : score >= 55 ? "关注" : "风险";
+  const reviewText = summary.balance < 0 ? "现金流为负，优先处理风险提醒。" : summary.income <= 0 ? "缺少收入数据，先补录工资。" : budgetUsed >= 1 ? "预算已经超出，优先压降非必要支出。" : "现金流为正，继续观察预算和未来计划。";
+  const problemItems = [
+    topCategory ? `最大支出集中在「${topCategory.category}」，本月 ${formatCurrency(topCategory.amount)}。` : "暂无支出结构，先补齐分类。",
+    summary.totalBudget > 0 ? `预算使用 ${Math.round(budgetUsed * 100)}%，剩余 ${formatCurrency(Math.max(summary.totalBudget - summary.expense, 0))}。` : "未设置总预算，无法判断支出上限。",
+    risks.find((item) => item.level !== "good")?.text || "未触发明显风险规则。",
+  ];
+  const actionItems = [
+    summary.income <= 0 ? "补录工资/固定收入，避免风险判断失真。" : "下月开始先预留固定支出和储备金。",
+    topCategory ? `给「${topCategory.category}」设置控制线，避免继续成为最大流向。` : "完成分类后再制定分类预算。",
+    budgetUsed >= 0.8 ? "本月剩余时间暂停新增非必要消费。" : "保持日均预算节奏，月底再复盘偏差。",
+  ];
+  return { score, grade, reviewText, topCategory, riskCount, problemItems, actionItems };
+}
+
+function billMonthlyReviewPanel(data, summary, risks, commitments) {
+  const review = buildMonthlyReviewInsights(summary, risks);
+  const actions = buildMonthlyActionItems(data, summary, risks, commitments);
+  const statusMap = ((data.budgets || {}).billActionStatuses || {})[summary.month] || {};
+  const doneCount = actions.filter((item) => statusMap[item.id] === "已完成").length;
+  const doingCount = actions.filter((item) => statusMap[item.id] === "进行中").length;
+  const todoCount = Math.max(actions.length - doneCount - doingCount, 0);
+  const doneRate = actions.length ? Math.round((doneCount / actions.length) * 100) : 0;
   return `
     <section class="panel bill-decision-panel">
       <div class="panel-head">
-        <h2>月度复盘</h2>
-        <span class="results-count">${escapeHtml(summary.month)}</span>
+        <h2>月度报告</h2>
+        <span class="results-count">${escapeHtml(summary.month)} · ${escapeHtml(review.grade)}</span>
       </div>
-      <div class="bill-review-grid">
-        <article><span>复盘判断</span><strong>${escapeHtml(reviewText)}</strong></article>
-        <article><span>最大支出</span><strong>${topCategory ? `${topCategory.category} ${formatCurrency(topCategory.amount)}` : "暂无支出"}</strong></article>
-        <article><span>待处理风险</span><strong>${risks.filter((item) => item.level !== "good").length} 项</strong></article>
+      <div class="bill-review-summary">
+        <article class="bill-review-score bill-review-score--${review.score >= 85 ? "good" : review.score >= 70 ? "stable" : review.score >= 55 ? "watch" : "risk"}">
+          <span>健康分</span>
+          <strong>${review.score}</strong>
+          <small>${escapeHtml(review.grade)}</small>
+        </article>
+        <article>
+          <span>复盘判断</span>
+          <strong>${escapeHtml(review.reviewText)}</strong>
+        </article>
+        <article>
+          <span>最大支出</span>
+          <strong>${review.topCategory ? `${escapeHtml(review.topCategory.category)} ${formatCurrency(review.topCategory.amount)}` : "暂无支出"}</strong>
+        </article>
+        <article>
+          <span>待处理风险</span>
+          <strong>${review.riskCount} 项</strong>
+        </article>
       </div>
-      <button class="ghost-button" data-create-bill-review="${escapeHtml(summary.month)}" type="button">保存为复盘笔记</button>
+      <div class="bill-review-progress">
+        <div>
+          <span>行动执行</span>
+          <strong>${doneCount}/${actions.length} 已完成</strong>
+          <small>${doingCount} 进行中 · ${todoCount} 待处理</small>
+        </div>
+        <div class="bill-review-progress__bar" aria-label="行动完成进度 ${doneRate}%">
+          <i style="width: ${doneRate}%"></i>
+        </div>
+      </div>
+      <div class="bill-review-columns">
+        <div>
+          <h3>问题来源</h3>
+          ${review.problemItems.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}
+        </div>
+        <div>
+          <h3>下月动作</h3>
+          ${review.actionItems.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}
+        </div>
+      </div>
+      <button class="ghost-button" data-create-bill-review="${escapeHtml(summary.month)}" type="button">保存为月报</button>
     </section>
   `;
 }
 
-function billLedgerRow(bill, activeMonth) {
+function billMonthlyReportHistoryPanel(data) {
+  const reports = (data.notes || [])
+    .filter((item) => item.noteType === "summary" && (item.billReportMonth || (item.tags || []).includes("月度复盘") || /生活收支(月报|复盘)/.test(item.title || "")))
+    .sort((left, right) => String(right.billReportMonth || right.title || right.updatedAt || "").localeCompare(String(left.billReportMonth || left.title || left.updatedAt || "")))
+    .slice(0, 6);
+  const reportMonths = new Set(reports.map((item) => item.billReportMonth || String(item.title || "").match(/\d{4}-\d{2}/)?.[0]).filter(Boolean));
+  const billMonths = [...new Set((data.bills || [])
+    .filter((item) => !item.excludeFromAnalysis && !item.analysisExcluded)
+    .map((item) => String(item.date || "").slice(0, 7))
+    .filter((month) => /^\d{4}-\d{2}$/.test(month)))]
+    .sort((left, right) => right.localeCompare(left))
+    .slice(0, 6);
+  const missingReportMonths = billMonths.filter((month) => !reportMonths.has(month)).slice(0, 3);
+  const trendRows = reports
+    .map((item) => ({
+      month: item.billReportMonth || String(item.title || "").match(/\d{4}-\d{2}/)?.[0] || "",
+      summary: item.billReportSummary || {},
+    }))
+    .filter((item) => item.month && Number.isFinite(Number(item.summary.balance)))
+    .slice()
+    .reverse();
+  const maxBalance = Math.max(...trendRows.map((item) => Math.abs(Number(item.summary.balance || 0))), 1);
+  const maxRisk = Math.max(...trendRows.map((item) => Number(item.summary.riskCount || 0)), 1);
+  const reportTrend = trendRows.length >= 2
+    ? `
+      <div class="bill-report-trend" style="--report-count:${trendRows.length}">
+        <div class="bill-report-trend__row">
+          <span>健康分</span>
+          ${trendRows.map((item) => `<i class="is-health" style="height:${Math.max(8, Math.round((Number(item.summary.healthScore || 0) / 100) * 36))}px" title="${escapeHtml(item.month)} 健康 ${escapeHtml(String(item.summary.healthScore ?? "-"))}"></i>`).join("")}
+        </div>
+        <div class="bill-report-trend__row">
+          <span>结余</span>
+          ${trendRows.map((item) => `<i class="${Number(item.summary.balance || 0) < 0 ? "is-risk" : "is-balance"}" style="height:${Math.max(8, Math.round((Math.abs(Number(item.summary.balance || 0)) / maxBalance) * 36))}px" title="${escapeHtml(item.month)} 结余 ${formatCurrency(item.summary.balance || 0)}"></i>`).join("")}
+        </div>
+        <div class="bill-report-trend__row">
+          <span>风险</span>
+          ${trendRows.map((item) => `<i class="is-risk" style="height:${Math.max(6, Math.round((Number(item.summary.riskCount || 0) / maxRisk) * 32))}px" title="${escapeHtml(item.month)} 风险 ${escapeHtml(String(item.summary.riskCount || 0))}"></i>`).join("")}
+        </div>
+        <div class="bill-report-trend__months">${trendRows.map((item) => `<b>${escapeHtml(item.month.slice(5) || item.month)}</b>`).join("")}</div>
+      </div>
+    `
+    : "";
+  return `
+    <section class="panel bill-report-history-panel">
+      <div class="panel-head">
+        <div>
+          <span class="eyebrow">REPORTS</span>
+          <h2>历史月报</h2>
+        </div>
+        <span class="results-count">${reports.length} 份</span>
+      </div>
+      ${reportTrend}
+      ${
+        missingReportMonths.length
+          ? `<div class="bill-report-missing">
+              <span>待生成月报</span>
+              ${missingReportMonths.map((month) => `<button class="ghost-button" data-create-bill-review="${escapeHtml(month)}" type="button">${escapeHtml(month)}</button>`).join("")}
+            </div>`
+          : ""
+      }
+      <div class="bill-report-history-list">
+        ${
+          reports.length
+            ? reports.map((item) => {
+              const month = item.billReportMonth || String(item.title || "").match(/\d{4}-\d{2}/)?.[0] || "未记录";
+              const report = item.billReportSummary || {};
+              const hasSummary = Number.isFinite(Number(report.income)) || Number.isFinite(Number(report.expense));
+              return `
+                <article class="bill-report-history-item" data-bill-report-open="${escapeHtml(item.id)}" tabindex="0" role="button" aria-label="打开${escapeHtml(month)}月报">
+                  <div>
+                    <strong>${escapeHtml(month)} 月报</strong>
+                    <span>${escapeHtml(item.description || "暂无月报结论")}</span>
+                    ${
+                      hasSummary
+                        ? `<div class="bill-report-history-metrics">
+                            <b class="${Number(report.balance || 0) < 0 ? "is-risk" : "is-good"}">结余 ${formatCurrency(report.balance || 0)}</b>
+                            <b>健康 ${escapeHtml(String(report.healthScore ?? "-"))}</b>
+                            <b>风险 ${escapeHtml(String(report.riskCount ?? 0))}</b>
+                            <b>行动 ${escapeHtml(String(report.actionDone ?? 0))}/${escapeHtml(String(report.actionTotal ?? 0))}</b>
+                            <b class="${report.qualityStatus === "完整" ? "is-good" : "is-risk"}">质量 ${escapeHtml(report.qualityStatus || "旧版")}</b>
+                          </div>`
+                        : ""
+                    }
+                  </div>
+                  <div class="bill-report-history-actions">
+                    <small>${escapeHtml(item.updatedAt || item.createdAt || "")}</small>
+                    <button class="ghost-button" data-bill-report-compare="${escapeHtml(month)}" type="button">对比</button>
+                  </div>
+                </article>
+              `;
+            }).join("")
+            : emptyState("保存月报后会显示在这里")
+        }
+      </div>
+    </section>
+  `;
+}
+
+function billLedgerRow(bill, activeMonth, activeCategory = "") {
   const isIncome = isIncomeBill(bill);
   const isPendingType = bill.type === "待确认";
   const needsCategoryReview = !isPendingType && bill.classification?.needsReview;
   const monthKey = String(bill.date || "").slice(0, 7);
+  const category = bill.category || "未分类";
+  const isVisible = monthKey === activeMonth && (!activeCategory || category === activeCategory);
   const excluded = Boolean(bill.excludeFromAnalysis || bill.analysisExcluded);
   return `
-    <tr data-bill-ledger-row data-bill-month-key="${escapeHtml(monthKey)}" ${monthKey === activeMonth ? "" : "hidden"}>
-      <td><strong>${escapeHtml(bill.date || "未设置")}</strong></td>
-      <td>
+    <article class="bill-ledger-card" data-bill-ledger-row data-bill-month-key="${escapeHtml(monthKey)}" data-bill-category-key="${escapeHtml(category)}" ${isVisible ? "" : "hidden"}>
+      <div class="bill-ledger-card__top">
+        <time>${escapeHtml(bill.date || "未设置")}</time>
         <div class="bill-ledger-title">
           <strong>${escapeHtml(bill.title || "未命名流水")}</strong>
           <span>${escapeHtml(bill.note || bill.goods || bill.remark || "")}</span>
           ${isPendingType ? '<em>待确认类型</em>' : needsCategoryReview ? '<em>待分类</em>' : excluded ? '<em>不计入分析</em>' : ""}
         </div>
-      </td>
-      <td>
+        <strong class="money ${isPendingType ? "pending" : isIncome ? "income" : "expense"}">${isPendingType ? "" : isIncome ? "+" : "-"}${formatCurrency(bill.amount)}</strong>
+      </div>
+      <div class="bill-ledger-card__bottom">
         <div class="bill-ledger-category-editor">
           <input data-bill-category-input="${escapeHtml(bill.id)}" value="${escapeHtml(bill.category || "未分类")}" list="billCategoryOptions" aria-label="分类" />
           <button class="ghost-button" data-bill-category-save="${escapeHtml(bill.id)}" type="button">保存</button>
         </div>
-      </td>
-      <td>${escapeHtml(bill.payer || bill.familyMember || "未指定")}</td>
-      <td>${escapeHtml(bill.source || "手动")}</td>
-      <td class="money ${isPendingType ? "pending" : isIncome ? "income" : "expense"}">${isPendingType ? "" : isIncome ? "+" : "-"}${formatCurrency(bill.amount)}</td>
-      <td>
+        <div class="bill-ledger-meta">
+          <span>${escapeHtml(bill.payer || bill.familyMember || "未指定")}</span>
+          <span>${escapeHtml(bill.source || "手动")}</span>
+        </div>
         <div class="bill-ledger-actions">
           <button class="ghost-button" data-bill-analysis-exclude="${escapeHtml(bill.id)}" data-next-excluded="${excluded ? "false" : "true"}" type="button">${excluded ? "计入" : "不计入"}</button>
           <button class="ghost-button" data-edit="bills:${escapeHtml(bill.id)}" type="button">编辑</button>
-          <button class="ghost-button" data-bill-ledger-detail="${escapeHtml(bill.id)}" type="button">详情</button>
         </div>
-      </td>
-    </tr>
+      </div>
+    </article>
   `;
 }
 
-function billLedgerModal(allBills, activeMonth, data = {}) {
+function billLedgerModal(allBills, activeMonth, data = {}, activeCategory = "") {
   const months = getBillHistoryRows(allBills || []).map((row) => row.month);
   const normalizedMonths = months.includes(activeMonth) ? months : [activeMonth, ...months].filter(Boolean);
   const rows = [...(allBills || [])].sort((left, right) => String(right.date || "").localeCompare(String(left.date || "")));
-  const monthCount = rows.filter((bill) => String(bill.date || "").startsWith(activeMonth)).length;
+  const monthRows = rows.filter((bill) => String(bill.date || "").startsWith(activeMonth));
+  const monthCount = monthRows.filter((bill) => !activeCategory || (bill.category || "未分类") === activeCategory).length;
   const categoryOptions = [...new Set((allBills || []).map((bill) => bill.category).filter(Boolean))]
     .sort((left, right) => String(left).localeCompare(String(right), "zh-CN"));
   return `
@@ -1586,28 +2822,19 @@ function billLedgerModal(allBills, activeMonth, data = {}) {
               )
               .join("")}
           </div>
-          <span class="results-count" data-bill-ledger-count>${escapeHtml(activeMonth)} · ${monthCount} 条</span>
+          <div class="bill-ledger-active-filter" ${activeCategory ? "" : "hidden"}>
+            <span>分类：${escapeHtml(activeCategory)}</span>
+            <button class="ghost-button" data-clear-bill-category-filter type="button">查看全部</button>
+          </div>
+          <span class="results-count" data-bill-ledger-count>${escapeHtml(activeMonth)}${activeCategory ? ` · ${escapeHtml(activeCategory)}` : ""} · ${monthCount} 条</span>
         </div>
         <div class="bill-ledger-table-wrap">
           <datalist id="billCategoryOptions">
             ${categoryOptions.map((category) => `<option value="${escapeHtml(category)}"></option>`).join("")}
           </datalist>
-          <table class="bill-ledger-table">
-            <thead>
-              <tr>
-                <th>日期</th>
-                <th>流水</th>
-                <th>分类</th>
-                <th>归属</th>
-                <th>来源</th>
-                <th>金额</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map((bill) => billLedgerRow(bill, activeMonth)).join("") || `<tr><td colspan="7">${emptyState("暂无流水")}</td></tr>`}
-            </tbody>
-          </table>
+          <div class="bill-ledger-card-grid">
+            ${rows.map((bill) => billLedgerRow(bill, activeMonth, activeCategory)).join("") || emptyState("暂无流水")}
+          </div>
         </div>
       </section>
     </dialog>
@@ -1854,6 +3081,10 @@ function renderBills(elements, data, ui, store) {
   const trendMode = ui.filters.billTrendMode || "cashflow";
   const trendScope = ui.filters.billTrendScope || "month";
   const trendRange = ui.filters.billTrendRange || 6;
+  const trendZoomStart = ui.filters.billTrendZoomStart ?? 0;
+  const trendZoomEnd = ui.filters.billTrendZoomEnd ?? 100;
+  const hiddenTrendSeries = ui.filters.billTrendHiddenSeries;
+  const trendCategories = ui.filters.billTrendCategories || [];
   const summary = getMonthlyFinanceSummary(data, month);
   const commitments = getFutureCommitments(data, month);
   const risks = buildFinanceRisks(summary, commitments);
@@ -1862,24 +3093,27 @@ function renderBills(elements, data, ui, store) {
     <div class="bill-dashboard-layout">
       <main class="bill-dashboard-layout__main">
         ${billTimelinePanel(data.bills || [], month, timelineScope)}
-        ${billTrendPanel(data, month, trendMode, trendRange, trendScope)}
+        ${billTrendPanel(data, month, trendMode, trendRange, trendScope, trendZoomStart, trendZoomEnd, hiddenTrendSeries, trendCategories)}
         ${billDecisionStrip(summary, commitments)}
+        ${billMonthlyActionPanel(data, summary, risks, commitments)}
         <div class="bill-decision-grid">
-          ${billAnalysisPanel(summary)}
-          ${billRiskPanel(risks)}
+          ${billAnalysisPanel(summary, data)}
+          ${billRiskPanel(risks, summary, data)}
         </div>
+        ${billCategoryFlowPanel(summary)}
         <div class="bill-decision-grid">
-          ${billBudgetPanel(summary)}
+          ${billBudgetPanel(summary, commitments, data)}
           ${billFuturePlanPanel(summary, commitments)}
         </div>
-        ${billMonthlyReviewPanel(summary, risks)}
+        ${billMonthlyReviewPanel(data, summary, risks, commitments)}
+        ${billMonthlyReportHistoryPanel(data)}
       </main>
       <aside class="bill-dashboard-layout__side">
         ${financeEntryPanel(month)}
         ${futurePlanEntryPanel(month)}
       </aside>
     </div>
-    ${billLedgerModal(data.bills || [], month, data)}
+    ${billLedgerModal(data.bills || [], month, data, ui.filters.billLedgerCategory || "")}
   `;
 }
 
