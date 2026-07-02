@@ -526,7 +526,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     document.querySelector(".bill-trend-panel.is-focusing-series")?.classList.remove("is-focusing-series");
     document.querySelectorAll(".bill-trend-panel [data-bill-trend-series].is-active-series").forEach((node) => node.classList.remove("is-active-series"));
     document.querySelectorAll(".bill-trend-cursor-line").forEach((node) => {
-      node.hidden = true;
+      node.setAttribute("hidden", "");
       node.classList.remove("is-visible");
     });
   }
@@ -538,18 +538,19 @@ export function bindEvents(app, elements, renderer, formController, authControll
       return;
     }
     const panel = target.closest(".bill-trend-panel");
+    const cursorPanel = panel || target.closest(".bill-forecast-control-chart");
     const seriesId = target.dataset.billTrendSeries || "";
     const cursorX = target.dataset.billTrendCursorX;
     if (panel && seriesId) {
       panel.classList.add("is-focusing-series");
       panel.querySelectorAll("[data-bill-trend-series]").forEach((node) => node.classList.toggle("is-active-series", node.dataset.billTrendSeries === seriesId));
     }
-    if (panel && cursorX) {
-      const cursorLine = panel.querySelector(".bill-trend-cursor-line");
+    if (cursorPanel && cursorX) {
+      const cursorLine = cursorPanel.querySelector(".bill-trend-cursor-line");
       if (cursorLine) {
         cursorLine.setAttribute("x1", cursorX);
         cursorLine.setAttribute("x2", cursorX);
-        cursorLine.hidden = false;
+        cursorLine.removeAttribute("hidden");
         cursorLine.classList.add("is-visible");
       }
     }
@@ -2338,6 +2339,9 @@ export function bindEvents(app, elements, renderer, formController, authControll
         metric: financeAiActionDecisionButton.dataset.aiActionMetric,
         score: Number(financeAiActionDecisionButton.dataset.aiActionScore || 0),
         reason: financeAiActionDecisionButton.dataset.aiActionReason,
+        budgetCategory: financeAiActionDecisionButton.dataset.aiActionBudgetCategory,
+        budgetAmount: financeAiActionDecisionButton.dataset.aiActionBudgetAmount,
+        subscriptionMonthlyBudget: financeAiActionDecisionButton.dataset.aiActionSubscriptionMonthlyBudget,
       };
       if (decision === "modify") {
         const nextTitle = window.prompt("行动标题", payload.title || "");

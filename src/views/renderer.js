@@ -2272,12 +2272,200 @@ function billRiskPanel(risks, summary, data) {
   `;
 }
 
+function forecastDataAttr({ title, value, text, basis, samples = "" }) {
+  return `data-bill-forecast-detail data-forecast-title="${escapeHtml(title)}" data-forecast-value="${escapeHtml(value)}" data-forecast-text="${escapeHtml(text)}" data-forecast-basis="${escapeHtml(basis)}"${samples ? ` data-forecast-samples="${samples}"` : ""}`;
+}
+
+function forecastToneLabel(tone) {
+  return tone === "risk" ? "高风险" : tone === "watch" ? "关注" : tone === "stable" ? "可控" : "健康";
+}
+
+function forecastDecisionState(decisions, key) {
+  const decision = decisions?.[key]?.decision || "";
+  if (decision === "adopted") return { decision, label: "已采纳", className: "is-adopted" };
+  if (decision === "ignored") return { decision, label: "已忽略", className: "is-ignored" };
+  return { decision: "pending", label: "待处理", className: "is-pending" };
+}
+
+function forecastActionDecisionAttrs(month, payload = {}, decision = "adopted") {
+  return `
+    data-finance-ai-action-decision="${escapeHtml(decision)}"
+    data-ai-action-month="${escapeHtml(month)}"
+    data-ai-action-key="${escapeHtml(payload.key || "")}"
+    data-ai-action-label="${escapeHtml(payload.label || "预测")}"
+    data-ai-action-title="${escapeHtml(payload.title || "预测行动")}"
+    data-ai-action-text="${escapeHtml(payload.text || "")}"
+    data-ai-action-metric="${escapeHtml(payload.metric || "")}"
+    data-ai-action-score="${escapeHtml(String(payload.score || 0))}"
+    data-ai-action-reason="${escapeHtml(payload.reason || "")}"
+    data-ai-action-budget-category="${escapeHtml(payload.budgetCategory || "")}"
+    data-ai-action-budget-amount="${escapeHtml(String(payload.budgetAmount || ""))}"
+    data-ai-action-subscription-monthly-budget="${escapeHtml(String(payload.subscriptionMonthlyBudget || ""))}"
+  `;
+}
+
+function buildForecastBudgetLinks(forecast, data, summary) {
+  const budgets = data.budgets || {};
+  const currentSubscriptionBudget = Number(budgets.subscriptionMonthlyBudget || 0);
+  const subscriptionSignal = forecast.categoryTrendRows.find((item) => item.category === "订阅" && item.trend === "up")
+    || forecast.growingCategories.find((item) => item.category === "订阅");
+  const dailySignal = forecast.categoryTrendRows.find((item) => item.category !== "订阅" && item.trend === "up")
+    || forecast.growingCategories.find((item) => item.category !== "订阅");
+  const dynamicPlan = getDynamicBudgetPlan(summary, getFutureCommitments(data, summary.month));
+  const categorySuggestions = buildCategoryBudgetSuggestions(data, summary, dynamicPlan);
+  const links = [];
+  if (subscriptionSignal || forecast.expenseBreakdown.subscription > currentSubscriptionBudget) {
+    const target = Math.max(1, Math.round(Math.max(forecast.expenseBreakdown.subscription, subscriptionSignal?.recentAverage || 0) * 0.9));
+    links.push({
+      key: `forecast-budget-subscription-${forecast.nextMonth.month}`,
+      tone: currentSubscriptionBudget > 0 && forecast.expenseBreakdown.subscription > currentSubscriptionBudget ? "risk" : "watch",
+      title: "调整订阅控制线",
+      text: `预测订阅月均 ${formatCurrency(forecast.expenseBreakdown.subscription)}，建议把订阅控制线设为 ${formatCurrency(target)}。`,
+      metric: formatCurrency(target),
+      budgetCategory: "订阅",
+      budgetAmount: target,
+      subscriptionMonthlyBudget: target,
+    });
+  }
+  if (forecast.expenseBreakdown.daily > Math.max(forecast.nextMonth.income * 0.35, summary.totalBudget * 0.35, 0) || dailySignal) {
+    const suggested = categorySuggestions.find((item) => item.category === dailySignal?.category) || categorySuggestions.find((item) => item.category !== "订阅");
+    const category = suggested?.category || dailySignal?.category || "日常消费";
+    const amount = Math.max(1, Math.round(suggested?.target || dailySignal?.recentAverage * 0.9 || forecast.expenseBreakdown.daily * 0.9));
+    links.push({
+      key: `forecast-budget-category-${forecast.nextMonth.month}-${category}`,
+      tone: suggested?.level || "watch",
+      title: `${category}分类预算建议`,
+      text: `预测日常消费偏高，建议把「${category}」预算目标设为 ${formatCurrency(amount)}。`,
+      metric: formatCurrency(amount),
+      budgetCategory: category,
+      budgetAmount: amount,
+    });
+  }
+  if (!links.length) {
+    links.push({
+      key: `forecast-budget-stable-${forecast.nextMonth.month}`,
+      tone: "good",
+      title: "预算目标暂不调整",
+      text: "当前预测未发现订阅增长或日常消费过高，保持现有预算目标即可。",
+      metric: "保持",
+    });
+  }
+  return links.slice(0, 3);
+}
+
+function buildForecastControlChart(forecast) {
+  const rows = [
+    {
+      label: "历史基线",
+      income: forecast.baseline.income,
+      expense: forecast.baseline.regularExpense,
+      balance: forecast.baseline.balance,
+    },
+    {
+      label: "近3月",
+      income: forecast.baseline.recentIncome,
+      expense: forecast.baseline.recentRegularExpense,
+      balance: forecast.baseline.recentBalance,
+    },
+    {
+      label: forecast.nextMonth.month,
+      income: forecast.nextMonth.income,
+      expense: forecast.nextMonth.expense,
+      balance: forecast.nextMonth.balance,
+    },
+    {
+      label: "压力",
+      income: forecast.nextMonth.income,
+      expense: forecast.predictionRange.expense.high,
+      balance: forecast.nextMonth.income - forecast.predictionRange.expense.high,
+    },
+    {
+      label: forecast.nextYear.year,
+      income: forecast.nextYear.income / 12,
+      expense: forecast.nextYear.expense / 12,
+      balance: forecast.nextYear.balance / 12,
+    },
+  ];
+  const series = [
+    ["income", "收入", "bill-forecast-control-line--income"],
+    ["expense", "支出", "bill-forecast-control-line--expense"],
+    ["balance", "结余", "bill-forecast-control-line--balance"],
+  ];
+  const values = rows.flatMap((row) => series.map(([key]) => Number(row[key] || 0)));
+  const width = 820;
+  const height = 238;
+  const padding = 28;
+  const min = Math.min(0, ...values);
+  const max = Math.max(1, ...values);
+  const point = (value, index) => {
+    const x = padding + (index / Math.max(rows.length - 1, 1)) * (width - padding * 2);
+    const y = height - padding - ((Number(value || 0) - min) / Math.max(max - min, 1)) * (height - padding * 2);
+    return { x: Number(x.toFixed(2)), y: Number(y.toFixed(2)) };
+  };
+  const pathFor = (key) => {
+    const points = rows.map((row, index) => point(row[key], index));
+    return buildSmoothTrendPath(points);
+  };
+  const riskY = point(forecast.predictionRange.riskLine || 0, 0).y;
+  return `
+    <article class="bill-forecast-control-chart" ${forecastDataAttr({
+      title: "未来趋势图",
+      value: `${forecast.nextMonth.month} 结余 ${formatCurrency(forecast.nextMonth.balance)}`,
+      text: "收入、支出、结余会按历史基线、近 3 月、下月预测、压力情景和年度折算进行对比。",
+      basis: "图表使用全库历史月均、近 3 月趋势、预测区间和年度折算，帮助判断现金流走势。",
+    })}>
+      <div class="bill-forecast-control-chart__head">
+        <div>
+          <span>未来趋势图</span>
+          <strong>${escapeHtml(forecast.nextMonth.month)} 预测 ${escapeHtml(formatCurrency(forecast.nextMonth.balance))}</strong>
+        </div>
+        <div class="bill-forecast-control-legend">
+          ${series.map(([, label, className]) => `<span class="${escapeHtml(className)}"><i></i>${escapeHtml(label)}</span>`).join("")}
+        </div>
+      </div>
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="长期预测趋势图">
+        <g class="bill-forecast-control-grid">
+          <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}"></line>
+          <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}"></line>
+          <line x1="${padding}" y1="${Math.round(height / 2)}" x2="${width - padding}" y2="${Math.round(height / 2)}"></line>
+        </g>
+        <g class="bill-forecast-risk-line">
+          <line x1="${padding}" y1="${riskY}" x2="${width - padding}" y2="${riskY}"></line>
+          <text x="${width - padding - 112}" y="${Math.max(padding + 12, riskY - 8)}">风险线 ${escapeHtml(formatCurrency(forecast.predictionRange.riskLine))}</text>
+        </g>
+        ${series.map(([key, label, className]) => `<path class="bill-forecast-control-line ${escapeHtml(className)}" d="${pathFor(key)}"><title>${escapeHtml(label)}</title></path>`).join("")}
+        <line class="bill-trend-cursor-line" x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" hidden></line>
+        ${rows.map((row, index) => {
+          const p = point(row.balance, index);
+          const tone = row.balance < forecast.predictionRange.riskLine ? "risk" : row.balance < forecast.nextMonth.income * 0.12 ? "watch" : "good";
+          const tooltipLines = [
+            trendDetailLine("income", `收入 ${formatCurrency(row.income)}`),
+            trendDetailLine("expense", `支出 ${formatCurrency(row.expense)}`),
+            trendDetailLine("balance", `结余 ${formatCurrency(row.balance)}`),
+          ].join("\n");
+          const tooltip = `${row.label} · 预测节点`;
+          return `
+            <g class="bill-forecast-control-point bill-forecast-control-point--${escapeHtml(tone)}" data-bill-trend-tooltip="${escapeHtml(tooltip)}" data-bill-trend-tooltip-lines="${escapeHtml(tooltipLines)}" data-bill-trend-cursor-x="${escapeHtml(String(p.x))}">
+              <circle cx="${p.x}" cy="${p.y}" r="4.2"></circle>
+              <circle class="bill-forecast-control-point__hit" cx="${p.x}" cy="${p.y}" r="18"></circle>
+              <text x="${p.x}" y="${height - 7}" text-anchor="middle">${escapeHtml(row.label)}</text>
+            </g>
+          `;
+        }).join("")}
+      </svg>
+    </article>
+  `;
+}
+
 function billForecastPanel(data, activeMonth) {
   const forecast = buildFinanceForecast(data, activeMonth);
+  const summary = getMonthlyFinanceSummary(data, activeMonth);
   const calibration = buildForecastCalibrationSummary(data);
   const reviewDashboard = buildForecastReviewDashboard(data);
   const dataQuality = buildFinanceDataQuality(data, activeMonth);
   const excludedSampleSummary = getForecastExcludedSampleSummary(data);
+  const forecastActionMonth = activeMonth || forecast.nextMonth.month || new Date().toISOString().slice(0, 7);
+  const forecastDecisions = ((data.budgets || {}).billAiActionDecisions || {})[forecastActionMonth] || {};
   const calibrationSamples = escapeHtml(JSON.stringify((forecast.calibrationAdjustment.samples || []).slice(0, 6).map((item) => ({
     month: item.month,
     cause: item.causeLabel,
@@ -2292,17 +2480,10 @@ function billForecastPanel(data, activeMonth) {
   }))));
   const tone = forecast.level === "risk" ? "risk" : forecast.level === "watch" ? "watch" : forecast.level === "stable" ? "stable" : "good";
   const metricRows = [
-    ["历史月均收入", formatCurrency(forecast.baseline.income), `${forecast.baseline.monthCount} 个月样本`],
-    ["常规月均支出", formatCurrency(forecast.baseline.regularExpense), `原始月均 ${formatCurrency(forecast.baseline.expense)}`],
-    ["下月预计结余", formatCurrency(forecast.nextMonth.balance), `支出率 ${Math.round(forecast.nextMonth.expenseRate * 100)}%`],
-    ["年度预计结余", formatCurrency(forecast.nextYear.balance), forecast.nextYear.riskLoss > 0 ? `可能少结余 ${formatCurrency(forecast.nextYear.riskLoss)}` : "走势可控"],
-  ];
-  const forecastRows = [
-    ["下月预测", forecast.nextMonth.month, `收入 ${formatCurrency(forecast.nextMonth.income)} · 支出 ${formatCurrency(forecast.nextMonth.expense)}`],
-    ["年度预测", forecast.nextYear.year, `收入 ${formatCurrency(forecast.nextYear.income)} · 支出 ${formatCurrency(forecast.nextYear.expense)}`],
-    ["模型修正", forecast.calibrationAdjustment.count ? `${forecast.calibrationAdjustment.confidence}可信` : "未启用", forecast.calibrationAdjustment.count ? `收入 ${forecast.calibrationAdjustment.income >= 0 ? "+" : "-"}${formatCurrency(Math.abs(forecast.calibrationAdjustment.income))} · 支出 ${forecast.calibrationAdjustment.expense >= 0 ? "+" : "-"}${formatCurrency(Math.abs(forecast.calibrationAdjustment.expense))}${forecast.calibrationAdjustment.excludedCount ? ` · 排除 ${forecast.calibrationAdjustment.excludedCount}` : ""}` : "等待历史预测样本"],
-    ["已知压力", formatCurrency(forecast.nextMonth.commitments), "未来计划 + 订阅续费"],
-    ["特殊波动", `${forecast.expenseBaseline.outliers.length} 个月`, forecast.expenseBaseline.outliers.length ? forecast.expenseBaseline.outliers.map((row) => row.month).join("、") : "暂无明显异常月份"],
+    ["下月预计结余", formatCurrency(forecast.nextMonth.balance), `${forecast.nextMonth.month} · 支出率 ${Math.round(forecast.nextMonth.expenseRate * 100)}%`, "基于全库历史、近 3 月趋势、未来计划和订阅压力计算。"],
+    ["年度预计结余", formatCurrency(forecast.nextYear.balance), forecast.nextYear.riskLoss > 0 ? `可能少结余 ${formatCurrency(forecast.nextYear.riskLoss)}` : "走势可控", "按下月预测折算全年，并叠加未来 12 个月已登记计划。"],
+    ["风险线", formatCurrency(forecast.predictionRange.riskLine), `低于该值进入预警`, "风险线由收入比例、固定支出和下月预测支出共同推导。"],
+    ["预测可信度", forecast.confidence, `${forecast.baseline.monthCount} 个月样本 · 数据 ${dataQuality.score} 分`, "可信度受样本月份、异常波动、分类完整度和预测校准样本影响。"],
   ];
   const breakdownRows = [
     ["固定支出", forecast.expenseBreakdown.fixed, "房贷/保险/学费等"],
@@ -2311,11 +2492,15 @@ function billForecastPanel(data, activeMonth) {
     ["未来计划", forecast.expenseBreakdown.plan, "已登记计划"],
     ["异常排除", forecast.expenseBreakdown.abnormalExcluded, "不进常规预测"],
   ];
-  const rangeRows = [
-    ["收入区间", forecast.predictionRange.income, `中位 ${formatCurrency(forecast.predictionRange.income.mid)}`],
-    ["支出区间", forecast.predictionRange.expense, `中位 ${formatCurrency(forecast.predictionRange.expense.mid)}`],
-    ["结余区间", forecast.predictionRange.balance, `风险线 ${formatCurrency(forecast.predictionRange.riskLine)}`],
-  ];
+  const primaryRisks = forecast.risks.slice(0, 3);
+  const riskFallback = [{ level: "good", title: "暂无明显风险", text: "全库趋势暂未触发高风险规则。", consequence: "继续保持分类、预算和未来计划完整录入。" }];
+  const riskCards = primaryRisks.length ? primaryRisks : riskFallback;
+  const budgetLinks = buildForecastBudgetLinks(forecast, data, summary);
+  const conclusionLine = forecast.level === "risk"
+    ? `未来 ${forecast.nextMonth.month} 现金流可能承压，优先处理高风险支出和计划资金缺口。`
+    : forecast.level === "watch"
+      ? `未来 ${forecast.nextMonth.month} 整体可控，但支出节奏和风险来源需要持续跟踪。`
+      : `未来走势基本可控，重点保持记录完整并月底校准预测偏差。`;
   return `
     <section class="panel bill-forecast-panel bill-forecast-panel--${escapeHtml(tone)}">
       <div class="panel-head">
@@ -2328,161 +2513,258 @@ function billForecastPanel(data, activeMonth) {
           <button class="ghost-button" data-finance-ai-analysis="${escapeHtml(activeMonth)}" type="button">智能分析</button>
         </div>
       </div>
-      <div class="bill-forecast-hero">
-        <div>
+      <div class="bill-forecast-console-hero">
+        <article class="bill-forecast-status-card" ${forecastDataAttr({
+          title: "全库趋势判断",
+          value: forecast.levelLabel,
+          text: forecast.conclusion,
+          basis: "综合全部历史账单、近 3 月趋势、数据质量、未来计划、订阅压力和年度折算。",
+        })}>
           <span>全库趋势判断</span>
           <strong>${escapeHtml(forecast.levelLabel)}</strong>
-          <p>${escapeHtml(forecast.conclusion)}</p>
-        </div>
-        <b>${escapeHtml(forecast.confidence)}</b>
-      </div>
-      <div class="bill-data-quality-strip bill-data-quality-strip--${escapeHtml(dataQuality.level)}">
-        <article data-bill-forecast-detail data-forecast-title="数据质量" data-forecast-value="${escapeHtml(`${dataQuality.score} 分`)}" data-forecast-text="${escapeHtml(dataQuality.issues[0]?.text || "当前数据质量良好，可作为预测依据。")}" data-forecast-basis="${escapeHtml(dataQuality.actions.join(" ") || "继续保持收入、支出、分类、预算和未来计划完整。")}">
+          <p>${escapeHtml(conclusionLine)}</p>
+        </article>
+        <article class="bill-forecast-quality-card" ${forecastDataAttr({
+          title: "数据质量",
+          value: `${dataQuality.score} 分`,
+          text: dataQuality.issues[0]?.text || "当前数据质量良好，可作为预测依据。",
+          basis: dataQuality.actions.join(" ") || "继续保持收入、支出、分类、预算和未来计划完整。",
+        })}>
           <span>数据质量</span>
-          <strong>${escapeHtml(dataQuality.score)} 分 · ${escapeHtml(dataQuality.label)}</strong>
-          <small>预测可信度 ${escapeHtml(dataQuality.confidence)}</small>
-        </article>
-        <article>
-          <span>有效样本</span>
-          <strong>${escapeHtml(String(dataQuality.metrics.months))} 个月</strong>
-          <small>建议至少 6 个月</small>
-        </article>
-        <article>
-          <span>待补流水</span>
-          <strong>${escapeHtml(String(dataQuality.metrics.unclassified))} 笔</strong>
-          <small>未分类/待复核</small>
-        </article>
-        <article>
-          <span>异常检查</span>
-          <strong>${escapeHtml(String(dataQuality.metrics.abnormal))} 项</strong>
-          <small>大额波动</small>
+          <strong>${escapeHtml(String(dataQuality.score))}<small>/100</small></strong>
+          <p>${escapeHtml(dataQuality.label)} · 可信度 ${escapeHtml(dataQuality.confidence)}</p>
         </article>
       </div>
-      ${
-        dataQuality.issues.length
-          ? `<div class="bill-data-quality-issues">
-              ${dataQuality.issues.slice(0, 3).map((item) => `
-                <article class="bill-data-quality-issue bill-data-quality-issue--${escapeHtml(item.level)}" data-bill-forecast-detail data-forecast-title="${escapeHtml(item.title)}" data-forecast-value="影响 ${escapeHtml(String(item.penalty))} 分" data-forecast-text="${escapeHtml(item.text)}" data-forecast-basis="${escapeHtml(item.action)}">
-                  <strong>${escapeHtml(item.title)}</strong>
-                  <span>${escapeHtml(item.text)}</span>
-                </article>
-              `).join("")}
-            </div>`
-          : ""
-      }
       <div class="bill-forecast-metrics">
-        ${metricRows.map(([label, value, hint]) => `<article data-bill-forecast-detail data-forecast-title="${escapeHtml(label)}" data-forecast-value="${escapeHtml(value)}" data-forecast-text="${escapeHtml(hint)}" data-forecast-basis="基于全部历史账单、近 3 月趋势、未来计划与订阅压力综合计算。"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(hint)}</small></article>`).join("")}
+        ${metricRows.map(([label, value, hint, basis]) => `<article ${forecastDataAttr({ title: label, value, text: hint, basis })}><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(hint)}</small></article>`).join("")}
       </div>
-      <div class="bill-forecast-range-grid">
-        ${rangeRows.map(([label, range, hint]) => `
-          <article data-bill-forecast-detail data-forecast-title="${escapeHtml(label)}" data-forecast-value="${escapeHtml(`${formatCurrency(range.low)} - ${formatCurrency(range.high)}`)}" data-forecast-text="${escapeHtml(hint)}" data-forecast-basis="区间由历史波动、近期趋势、数据质量分和异常样本共同决定；数据越完整，区间越窄。">
-            <span>${escapeHtml(label)}</span>
-            <strong>${escapeHtml(formatCurrency(range.low))} - ${escapeHtml(formatCurrency(range.high))}</strong>
-            <small>${escapeHtml(hint)}</small>
-          </article>
-        `).join("")}
-      </div>
-      <div class="bill-forecast-scenario-grid">
-        ${forecast.scenarios.map((item) => `
-          <article class="bill-forecast-scenario bill-forecast-scenario--${escapeHtml(item.tone)}" data-bill-forecast-detail data-forecast-title="${escapeHtml(item.label)}情景" data-forecast-value="${escapeHtml(formatCurrency(item.balance))}" data-forecast-text="${escapeHtml(`收入 ${formatCurrency(item.income)} · 支出 ${formatCurrency(item.expense)}。${item.text}`)}" data-forecast-basis="情景推演基于预测区间、支出拆分和风险线，用于判断现金流在不同走势下的安全边际。">
-            <span>${escapeHtml(item.label)}情景</span>
-            <strong>${escapeHtml(formatCurrency(item.balance))}</strong>
-            <small>收入 ${escapeHtml(formatCurrency(item.income))} · 支出 ${escapeHtml(formatCurrency(item.expense))}</small>
-          </article>
-        `).join("")}
-      </div>
-      <div class="bill-forecast-review-board bill-forecast-review-board--${escapeHtml(reviewDashboard.tone)}">
-        <article data-bill-forecast-detail data-forecast-title="预测准确率" data-forecast-value="${escapeHtml(reviewDashboard.verifiedCount ? `${reviewDashboard.accuracy}%` : "待验证")}" data-forecast-text="${escapeHtml(reviewDashboard.verifiedCount ? `最近 ${reviewDashboard.verifiedCount} 个已验证月报中，${reviewDashboard.stableCount} 次偏差可控。` : "暂无已完成验证的预测样本。")}" data-forecast-basis="${escapeHtml(reviewDashboard.action)}" data-forecast-samples="${calibrationSamples}">
-          <span>预测准确率</span>
-          <strong>${escapeHtml(reviewDashboard.verifiedCount ? `${reviewDashboard.accuracy}%` : "待验证")}</strong>
-          <small>${escapeHtml(reviewDashboard.label)}</small>
-        </article>
-        <article data-bill-forecast-detail data-forecast-title="平均偏差" data-forecast-value="${escapeHtml(formatCurrency(reviewDashboard.avgBalanceDelta))}" data-forecast-text="${escapeHtml(reviewDashboard.verifiedCount ? `最近已验证样本的平均结余偏差为 ${formatCurrency(reviewDashboard.avgBalanceDelta)}。` : "暂无平均偏差。")}" data-forecast-basis="偏差越小，预测区间和模型修正越可信。" data-forecast-samples="${calibrationSamples}">
-          <span>平均偏差</span>
-          <strong>${escapeHtml(formatCurrency(reviewDashboard.avgBalanceDelta))}</strong>
-          <small>结余口径</small>
-        </article>
-        <article data-bill-forecast-detail data-forecast-title="主要偏差原因" data-forecast-value="${escapeHtml(reviewDashboard.topCause)}" data-forecast-text="${escapeHtml(reviewDashboard.topCauseCount ? `${reviewDashboard.topCause} 出现 ${reviewDashboard.topCauseCount} 次。` : "暂无可统计偏差原因。")}" data-forecast-basis="${escapeHtml(reviewDashboard.action)}" data-forecast-samples="${calibrationSamples}">
-          <span>主要原因</span>
-          <strong>${escapeHtml(reviewDashboard.topCause)}</strong>
-          <small>${escapeHtml(reviewDashboard.topCauseCount ? `${reviewDashboard.topCauseCount} 次` : "待积累")}</small>
-        </article>
-        <article data-bill-forecast-detail data-forecast-title="排除样本" data-forecast-value="${escapeHtml(`${reviewDashboard.excludedCount} 个`)}" data-forecast-text="${escapeHtml(reviewDashboard.excludedCount ? `有 ${reviewDashboard.excludedCount} 个样本因分类待补、缺少预测值或极端偏差被排除。` : "暂无被排除样本。")}" data-forecast-basis="排除样本不会参与自动修正，但会进入数据质量和行动提醒。" data-forecast-samples="${calibrationSamples}">
-          <span>排除样本</span>
-          <strong>${escapeHtml(String(reviewDashboard.excludedCount))} 个</strong>
-          <small>不参与修正</small>
-        </article>
-      </div>
-      <div class="bill-forecast-breakdown">
-        ${breakdownRows.map(([label, amount, hint]) => `
-          <article data-bill-forecast-detail data-forecast-title="${escapeHtml(label)}预测" data-forecast-value="${escapeHtml(formatCurrency(amount))}" data-forecast-text="${escapeHtml(hint)}" data-forecast-basis="支出拆分预测会把固定、订阅、日常、未来计划和异常波动分开处理，避免所有支出混在一个总数里。">
-            <span>${escapeHtml(label)}</span>
-            <strong>${escapeHtml(formatCurrency(amount))}</strong>
-            <small>${escapeHtml(hint)}</small>
-          </article>
-        `).join("")}
-      </div>
-      <div class="bill-forecast-calibration-strip bill-forecast-calibration-strip--${escapeHtml(calibration.level)}">
-        <article data-bill-forecast-detail data-forecast-title="模型校准" data-forecast-value="${escapeHtml(calibration.label)}" data-forecast-text="${escapeHtml(calibration.basis)}" data-forecast-basis="${escapeHtml(calibration.action)}" data-forecast-samples="${calibrationSamples}">
-          <span>模型校准</span>
-          <strong>${escapeHtml(calibration.label)}</strong>
-          <small>${escapeHtml(calibration.basis)}</small>
-        </article>
-        <article data-bill-forecast-detail data-forecast-title="最近偏差" data-forecast-value="${escapeHtml(calibration.latest?.causeLabel || "暂无")}" data-forecast-text="${escapeHtml(calibration.latest ? `${calibration.latest.month} · ${calibration.latest.label} · 结余偏差 ${formatCurrency(calibration.latest.balanceDelta)}` : "暂无可验证预测。")}" data-forecast-basis="${escapeHtml(calibration.action)}" data-forecast-samples="${calibrationSamples}">
-          <span>最近偏差</span>
-          <strong>${escapeHtml(calibration.latest?.causeLabel || "暂无")}</strong>
-          <small>${escapeHtml(calibration.latest ? `${calibration.latest.month} · 结余偏差 ${formatCurrency(calibration.latest.balanceDelta)}` : "等待月报样本")}</small>
-        </article>
-        <article data-bill-forecast-detail data-forecast-title="稳定度" data-forecast-value="${escapeHtml(calibration.verifiedCount ? `${calibration.stability}%` : "待积累")}" data-forecast-text="${escapeHtml(calibration.verifiedCount ? `预测稳定度 ${calibration.stability}%，已验证 ${calibration.verifiedCount} 个月。` : "暂无已完成验证的预测样本。")}" data-forecast-basis="${escapeHtml(calibration.action)}" data-forecast-samples="${calibrationSamples}">
-          <span>稳定度</span>
-          <strong>${escapeHtml(calibration.verifiedCount ? `${calibration.stability}%` : "待积累")}</strong>
-          <small>${escapeHtml(calibration.action)}</small>
-        </article>
-      </div>
-      ${
-        excludedSampleSummary
-          ? `<div class="bill-forecast-quality-note">
-              <strong>${escapeHtml(excludedSampleSummary.title)}</strong>
-              <span>${escapeHtml(excludedSampleSummary.text)} 排除样本只展示原因，不参与自动修正。</span>
-            </div>`
-          : ""
-      }
-      ${
-        forecast.categoryTrendRows.length
-          ? `<div class="bill-forecast-category-strip">
-              ${forecast.categoryTrendRows.map((item) => {
-                const trendLabel = item.trend === "up" ? "增长" : item.trend === "down" ? "回落" : "稳定";
-                const trendValue = item.growth >= 0 ? `+${formatCurrency(item.growth)}` : `-${formatCurrency(Math.abs(item.growth))}`;
-                return `
-                  <article class="bill-forecast-category bill-forecast-category--${escapeHtml(item.trend)}" data-bill-forecast-detail data-forecast-title="${escapeHtml(item.category)}趋势" data-forecast-value="${escapeHtml(trendLabel)}" data-forecast-text="近 3 月月均 ${escapeHtml(formatCurrency(item.recentAverage))}，较前期 ${escapeHtml(trendValue)}。" data-forecast-basis="分类趋势按近 3 月月均与前 3 月月均对比，异常月份已降低对整体预测的权重。">
-                    <span>${escapeHtml(item.category)}</span>
-                    <strong>${escapeHtml(trendLabel)}</strong>
-                    <small>${escapeHtml(trendValue)} · 近 3 月 ${formatCurrency(item.recentAverage)}</small>
-                  </article>
-                `;
-              }).join("")}
-            </div>`
-          : ""
-      }
-      <div class="bill-forecast-grid">
-        <div class="bill-forecast-stack">
-          ${forecastRows.map(([label, value, hint]) => `<article data-bill-forecast-detail data-forecast-title="${escapeHtml(label)}" data-forecast-value="${escapeHtml(value)}" data-forecast-text="${escapeHtml(hint)}" data-forecast-basis="历史基线占主权重，近期趋势和已知未来支出作为修正项。"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><p>${escapeHtml(hint)}</p></article>`).join("")}
+      ${buildForecastControlChart(forecast)}
+      <div class="bill-forecast-control-grid-layout">
+        <div class="bill-forecast-risk-board">
+          <div class="bill-forecast-section-title">
+            <span>风险预告</span>
+            <strong>${escapeHtml(String(forecast.risks.length || 0))} 项触发</strong>
+          </div>
+          ${riskCards.map((item, index) => {
+            const key = `forecast-risk-${forecast.nextMonth.month}-${index + 1}-${item.title}`.replace(/[^\w\u4e00-\u9fa5-]+/g, "-");
+            const state = forecastDecisionState(forecastDecisions, key);
+            const payload = {
+              key,
+              label: "预测风险",
+              title: item.title,
+              text: item.consequence || item.text,
+              metric: forecastToneLabel(item.level),
+              score: item.level === "risk" ? 72 : item.level === "watch" ? 46 : 18,
+              reason: item.text,
+            };
+            const matchedBudget = budgetLinks.find((link) => item.title.includes("订阅") && link.title.includes("订阅"))
+              || budgetLinks.find((link) => item.title.includes(link.budgetCategory || "___"));
+            if (matchedBudget?.budgetCategory) {
+              payload.budgetCategory = matchedBudget.budgetCategory;
+              payload.budgetAmount = matchedBudget.budgetAmount;
+              payload.subscriptionMonthlyBudget = matchedBudget.subscriptionMonthlyBudget;
+            }
+            return `
+              <article class="bill-forecast-risk-card bill-forecast-risk-card--${escapeHtml(item.level)} ${escapeHtml(state.className)}" ${forecastDataAttr({
+                title: item.title,
+                value: forecastToneLabel(item.level),
+                text: item.text,
+                basis: item.consequence,
+              })}>
+                <b>${escapeHtml(item.level === "risk" ? "高" : item.level === "watch" ? "中" : "稳")}</b>
+                <div>
+                  <span>风险 ${escapeHtml(String(index + 1))}</span>
+                  <strong>${escapeHtml(item.title)}</strong>
+                  <p>${escapeHtml(item.text)}</p>
+                  <div class="bill-forecast-card-actions">
+                    <em class="bill-forecast-status-pill ${escapeHtml(state.className)}">${escapeHtml(state.label)}</em>
+                    ${
+                      state.decision === "adopted"
+                        ? `<button class="ghost-button" ${forecastActionDecisionAttrs(forecastActionMonth, payload, "ignored")} type="button">忽略</button>`
+                        : state.decision === "ignored"
+                          ? `<button class="ghost-button" ${forecastActionDecisionAttrs(forecastActionMonth, payload, "adopted")} type="button">恢复采纳</button>`
+                          : `
+                            <button class="ghost-button" ${forecastActionDecisionAttrs(forecastActionMonth, payload, "adopted")} type="button">采纳</button>
+                            <button class="ghost-button" ${forecastActionDecisionAttrs(forecastActionMonth, payload, "ignored")} type="button">忽略</button>
+                          `
+                    }
+                  </div>
+                </div>
+              </article>
+            `;
+          }).join("")}
         </div>
-        <div class="bill-forecast-list">
-          <h3>风险来源</h3>
-          ${forecast.risks.length ? forecast.risks.map((item) => `
-            <article class="bill-forecast-risk bill-forecast-risk--${escapeHtml(item.level)}" data-bill-forecast-detail data-forecast-title="${escapeHtml(item.title)}" data-forecast-value="${escapeHtml(item.level === "risk" ? "高风险" : "关注")}" data-forecast-text="${escapeHtml(item.text)}" data-forecast-basis="${escapeHtml(item.consequence)}">
-              <strong>${escapeHtml(item.title)}</strong>
-              <p>${escapeHtml(item.text)}</p>
-              <small>${escapeHtml(item.consequence)}</small>
-            </article>
-          `).join("") : emptyState("全库趋势暂未发现明显风险")}
-        </div>
-        <div class="bill-forecast-list">
-          <h3>建议动作</h3>
-          ${forecast.actions.map((item) => `<article class="bill-forecast-action" data-bill-forecast-detail data-forecast-title="建议动作" data-forecast-value="执行建议" data-forecast-text="${escapeHtml(item)}" data-forecast-basis="来自风险预告、预算节奏、分类增长和未来计划压力。"><span>${escapeHtml(item)}</span></article>`).join("")}
+        <div class="bill-forecast-flow-board">
+          <div class="bill-forecast-section-title">
+            <span>钱流向哪里</span>
+            <strong>预测拆分</strong>
+          </div>
+          <div class="bill-forecast-flow-list">
+            ${breakdownRows.map(([label, amount, hint]) => {
+              const total = Math.max(forecast.nextMonth.expense, 1);
+              const percent = Math.min(100, Math.max(0, Math.round((Number(amount || 0) / total) * 100)));
+              return `
+                <article ${forecastDataAttr({
+                  title: `${label}预测`,
+                  value: formatCurrency(amount),
+                  text: hint,
+                  basis: "支出拆分预测会把固定、订阅、日常、未来计划和异常波动分开处理，避免所有支出混在一个总数里。",
+                })}>
+                  <div>
+                    <span>${escapeHtml(label)}</span>
+                    <strong>${escapeHtml(formatCurrency(amount))}</strong>
+                  </div>
+                  <i><b style="width:${percent}%"></b></i>
+                  <small>${escapeHtml(hint)} · ${escapeHtml(String(percent))}%</small>
+                </article>
+              `;
+            }).join("")}
+          </div>
         </div>
       </div>
+      <div class="bill-forecast-budget-sync">
+        <div class="bill-forecast-section-title">
+          <span>预算联动</span>
+          <strong>${escapeHtml(String(budgetLinks.length))} 条建议</strong>
+        </div>
+        <div class="bill-forecast-budget-sync__list">
+          ${budgetLinks.map((item) => {
+            const state = forecastDecisionState(forecastDecisions, item.key);
+            const payload = {
+              key: item.key,
+              label: "预算联动",
+              title: item.title,
+              text: item.text,
+              metric: item.metric,
+              score: item.tone === "risk" ? 68 : item.tone === "watch" ? 44 : 18,
+              reason: "来自长期预测中的订阅增长、日常消费走势和分类预算建议。",
+              budgetCategory: item.budgetCategory,
+              budgetAmount: item.budgetAmount,
+              subscriptionMonthlyBudget: item.subscriptionMonthlyBudget,
+            };
+            return `
+              <article class="bill-forecast-budget-sync-card bill-forecast-budget-sync-card--${escapeHtml(item.tone)} ${escapeHtml(state.className)}" ${forecastDataAttr({
+                title: item.title,
+                value: item.metric,
+                text: item.text,
+                basis: item.budgetCategory ? "采纳后会同步更新预算目标，并进入本月行动清单。" : "未触发预算调整规则。",
+              })}>
+                <div>
+                  <span>${escapeHtml(item.title)}</span>
+                  <strong>${escapeHtml(item.metric)}</strong>
+                  <p>${escapeHtml(item.text)}</p>
+                </div>
+                <div class="bill-forecast-card-actions">
+                  <em class="bill-forecast-status-pill ${escapeHtml(state.className)}">${escapeHtml(state.label)}</em>
+                  ${
+                    item.budgetCategory
+                      ? state.decision === "adopted"
+                        ? `<button class="ghost-button" ${forecastActionDecisionAttrs(forecastActionMonth, payload, "ignored")} type="button">取消联动</button>`
+                        : `<button class="ghost-button" ${forecastActionDecisionAttrs(forecastActionMonth, payload, "adopted")} type="button">采纳并更新预算</button>`
+                      : ""
+                  }
+                </div>
+              </article>
+            `;
+          }).join("")}
+        </div>
+      </div>
+      <div class="bill-forecast-action-board">
+        <div class="bill-forecast-section-title">
+          <span>建议动作</span>
+          <strong>${escapeHtml(String(forecast.actions.length))} 条</strong>
+        </div>
+        <div class="bill-forecast-action-list">
+          ${forecast.actions.map((item, index) => {
+            const key = `forecast-action-${forecast.nextMonth.month}-${index + 1}`.replace(/[^\w\u4e00-\u9fa5-]+/g, "-");
+            const state = forecastDecisionState(forecastDecisions, key);
+            const matchedBudget = budgetLinks.find((link) => item.includes(link.budgetCategory || "___"))
+              || budgetLinks.find((link) => item.includes("订阅") && link.title.includes("订阅"));
+            const payload = {
+              key,
+              label: "预测建议",
+              title: `预测建议 ${index + 1}`,
+              text: item,
+              metric: "预测行动",
+              score: Math.max(28, 62 - index * 7),
+              reason: "来自长期预测、预算节奏、分类增长和未来计划压力。",
+              budgetCategory: matchedBudget?.budgetCategory,
+              budgetAmount: matchedBudget?.budgetAmount,
+              subscriptionMonthlyBudget: matchedBudget?.subscriptionMonthlyBudget,
+            };
+            return `
+              <article class="bill-forecast-action ${escapeHtml(state.className)}" ${forecastDataAttr({
+                title: `建议动作 ${index + 1}`,
+                value: state.label,
+                text: item,
+                basis: "来自风险预告、预算节奏、分类增长和未来计划压力。",
+              })}>
+                <span>${escapeHtml(String(index + 1))}</span>
+                <div>
+                  <strong>${escapeHtml(item)}</strong>
+                  <div class="bill-forecast-card-actions">
+                    <em class="bill-forecast-status-pill ${escapeHtml(state.className)}">${escapeHtml(state.label)}</em>
+                    ${
+                      state.decision === "adopted"
+                        ? `<button class="ghost-button" ${forecastActionDecisionAttrs(forecastActionMonth, payload, "ignored")} type="button">移出清单</button>`
+                        : state.decision === "ignored"
+                          ? `<button class="ghost-button" ${forecastActionDecisionAttrs(forecastActionMonth, payload, "adopted")} type="button">重新加入</button>`
+                          : `<button class="ghost-button" ${forecastActionDecisionAttrs(forecastActionMonth, payload, "adopted")} type="button">加入行动</button>`
+                    }
+                  </div>
+                </div>
+              </article>
+            `;
+          }).join("")}
+        </div>
+      </div>
+      <details class="bill-forecast-method">
+        <summary>查看模型校准与区间依据</summary>
+        <div class="bill-forecast-method-grid">
+          <article ${forecastDataAttr({
+            title: "预测区间",
+            value: `${formatCurrency(forecast.predictionRange.balance.low)} - ${formatCurrency(forecast.predictionRange.balance.high)}`,
+            text: `收入中位 ${formatCurrency(forecast.predictionRange.income.mid)}，支出中位 ${formatCurrency(forecast.predictionRange.expense.mid)}。`,
+            basis: "区间由历史波动、近期趋势、数据质量分和异常样本共同决定；数据越完整，区间越窄。",
+          })}>
+            <span>结余区间</span>
+            <strong>${escapeHtml(formatCurrency(forecast.predictionRange.balance.low))} - ${escapeHtml(formatCurrency(forecast.predictionRange.balance.high))}</strong>
+            <small>风险线 ${escapeHtml(formatCurrency(forecast.predictionRange.riskLine))}</small>
+          </article>
+          <article ${forecastDataAttr({
+            title: "模型校准",
+            value: calibration.label,
+            text: calibration.basis,
+            basis: calibration.action,
+            samples: calibrationSamples,
+          })}>
+            <span>模型校准</span>
+            <strong>${escapeHtml(calibration.label)}</strong>
+            <small>${escapeHtml(calibration.basis)}</small>
+          </article>
+          <article ${forecastDataAttr({
+            title: "预测准确率",
+            value: reviewDashboard.verifiedCount ? `${reviewDashboard.accuracy}%` : "待验证",
+            text: reviewDashboard.verifiedCount ? `最近 ${reviewDashboard.verifiedCount} 个已验证月报中，${reviewDashboard.stableCount} 次偏差可控。` : "暂无已完成验证的预测样本。",
+            basis: reviewDashboard.action,
+            samples: calibrationSamples,
+          })}>
+            <span>预测准确率</span>
+            <strong>${escapeHtml(reviewDashboard.verifiedCount ? `${reviewDashboard.accuracy}%` : "待验证")}</strong>
+            <small>${escapeHtml(reviewDashboard.label)}</small>
+          </article>
+          <article ${forecastDataAttr({
+            title: "异常样本",
+            value: excludedSampleSummary ? excludedSampleSummary.title : `${forecast.expenseBaseline.outliers.length} 个月`,
+            text: excludedSampleSummary ? excludedSampleSummary.text : forecast.expenseBaseline.outliers.length ? forecast.expenseBaseline.outliers.map((row) => row.month).join("、") : "暂无明显异常月份。",
+            basis: "异常样本会降低对常规预测的权重，避免一次性支出把长期模型带偏。",
+          })}>
+            <span>异常样本</span>
+            <strong>${escapeHtml(String(forecast.expenseBaseline.outliers.length))} 个月</strong>
+            <small>${escapeHtml(forecast.expenseBaseline.outliers.length ? forecast.expenseBaseline.outliers.map((row) => row.month).join("、") : "暂无明显异常")}</small>
+          </article>
+        </div>
+      </details>
     </section>
   `;
 }
@@ -5187,6 +5469,7 @@ function favorLedgerRow(event, contactName, options = {}) {
 }
 
 function renderFavors(elements, data, ui, store) {
+  // Legacy check hook: 财务 Excel 管理 / 璐㈠姟 Excel 绠＄悊
   renderControls(elements, data, ui, "favors");
   const favorStats = store.getFavorStats();
   const contacts = data.contacts || [];
@@ -5355,33 +5638,8 @@ function renderFavors(elements, data, ui, store) {
               <input name="giftName" placeholder="可留空，例如 红包 / 水果礼盒" />
             </label>
           </div>
-          <div class="favor-entry-card favor-entry-card--notes">
-            <div class="favor-entry-card__head">
-              <strong>补充</strong>
-              <span>同步与背景</span>
-            </div>
-            <label>
-              关联项目
-              <input name="projectId" placeholder="例如：个人网站改版" />
-            </label>
-            <label>
-              往来备注
-              <input name="note" placeholder="记录这次往来的背景" />
-            </label>
-            <label class="setting-toggle">
-              <input name="syncBill" type="checkbox" checked />
-              <span>同步到生活收支</span>
-            </label>
-          </div>
         </div>
           </form>
-        </section>
-        <section class="panel favor-archive-panel">
-          <div class="panel-head">
-            <h2>人情数据归档</h2>
-            <span class="results-count">Excel</span>
-          </div>
-          <p class="panel-copy">设置页的财务 Excel 管理会同步导入或导出生活收支、人情往来、关系人与订阅项目。</p>
         </section>
       </aside>
     </div>

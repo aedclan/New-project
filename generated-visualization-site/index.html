@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>InsightFlow Visualization Mockup</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@500;600;700&family=Fira+Sans:wght@400;500;600;700&display=swap');
+
+    :root {
+      --primary: #050505;
+      --secondary: #6dff91;
+      --accent: #72ff9a;
+      --background: #efefee;
+      --foreground: #050505;
+      --muted: #f4f4f2;
+      --border: #e8e8e4;
+      --ink: #050505;
+      --soft: #77746f;
+      --success: #30ef72;
+      --danger: #df3f3f;
+      --panel: rgba(255, 255, 255, 0.94);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 50% 28%, rgba(114, 255, 154, 0.16), transparent 28%),
+        linear-gradient(180deg, #d9d9d7 0%, var(--background) 100%);
+      font-family: "Fira Sans", system-ui, sans-serif;
+      letter-spacing: 0;
+    }
+
+    .shell {
+      width: min(1360px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 40px 30px 34px;
+      background: #fbfbfa;
+      box-shadow: 0 30px 90px rgba(0, 0, 0, 0.12);
+    }
+
+    .nav {
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      border: 1px solid rgba(232, 232, 228, 0.95);
+      background: rgba(251, 251, 250, 0.78);
+      backdrop-filter: blur(18px);
+      border-radius: 8px;
+      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.035);
+    }
+
+    .brand {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      font-family: "Fira Sans", sans-serif;
+      font-weight: 700;
+      color: var(--foreground);
+    }
+
+    .mark {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      color: #050505;
+      background:
+        radial-gradient(circle at 72% 34%, #101010 0 10px, transparent 11px),
+        radial-gradient(circle at 28% 66%, #101010 0 8px, transparent 9px),
+        linear-gradient(135deg, #72ff9a, #5af07d);
+      box-shadow: 0 10px 24px rgba(48, 239, 114, 0.24);
+    }
+
+    .navlinks {
+      display: flex;
+      gap: 26px;
+      color: #111;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .cta {
+      min-height: 40px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 16px;
+      border: 0;
+      border-radius: 8px;
+      color: #fff;
+      background: var(--primary);
+      font: 700 14px "Fira Sans", sans-serif;
+      box-shadow: 0 14px 24px rgba(0, 0, 0, 0.16);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 0.92fr 1.36fr;
+      gap: 22px;
+      align-items: stretch;
+      margin-top: 22px;
+    }
+
+    .copy {
+      padding: 44px 34px 34px;
+      border: 1px solid rgba(232, 232, 228, 0.95);
+      background: var(--panel);
+      border-radius: 8px;
+      box-shadow: 0 20px 54px rgba(0, 0, 0, 0.045);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      color: var(--primary);
+      background: #effff3;
+      border: 1px solid var(--border);
+      font: 700 12px "Fira Code", monospace;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 22px 0 16px;
+      color: #050505;
+      font: 700 clamp(42px, 5vw, 72px) / 0.98 "Fira Code", monospace;
+    }
+
+    .lead {
+      max-width: 560px;
+      color: #6f6b66;
+      font-size: 18px;
+      line-height: 1.65;
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .ghost {
+      min-height: 42px;
+      padding: 0 16px;
+      border: 1px solid #e4e4df;
+      border-radius: 8px;
+      color: var(--foreground);
+      background: #fff;
+      font-weight: 700;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 34px;
+    }
+
+    .stat {
+      padding: 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #fff;
+    }
+
+    .stat strong {
+      display: block;
+      color: var(--foreground);
+      font: 700 24px "Fira Code", monospace;
+    }
+
+    .stat span {
+      display: block;
+      margin-top: 5px;
+      color: #77746f;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .dashboard {
+      min-height: 690px;
+      padding: 18px;
+      border: 1px solid rgba(232, 232, 228, 0.95);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 28px 80px rgba(0, 0, 0, 0.07);
+    }
+
+    .dash-top {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .kpi,
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 12px 26px rgba(0, 0, 0, 0.035);
+    }
+
+    .kpi {
+      padding: 14px;
+      min-height: 100px;
+    }
+
+    .kpi label {
+      color: #77746f;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .kpi b {
+      display: block;
+      margin-top: 9px;
+      color: #050505;
+      font: 700 28px "Fira Code", monospace;
+    }
+
+    .delta {
+      margin-top: 7px;
+      color: var(--success);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .dash-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .panel {
+      padding: 16px;
+      overflow: hidden;
+    }
+
+    .panel h2 {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 0 14px;
+      color: #050505;
+      font: 700 16px "Fira Code", monospace;
+    }
+
+    .chip {
+      padding: 5px 8px;
+      border-radius: 999px;
+      color: #044416;
+      background: #ecfff1;
+      border: 1px solid #caffd6;
+      font: 700 11px "Fira Sans", sans-serif;
+    }
+
+    .chart {
+      position: relative;
+      height: 245px;
+      border-radius: 8px;
+      background:
+        linear-gradient(#eeeeea 1px, transparent 1px) 0 0 / 100% 40px,
+        linear-gradient(90deg, #eeeeea 1px, transparent 1px) 0 0 / 60px 100%,
+        linear-gradient(180deg, #fff, #fbfbfa);
+    }
+
+    .line {
+      position: absolute;
+      inset: 22px 22px 30px;
+    }
+
+    .bar-wrap {
+      height: 245px;
+      display: flex;
+      align-items: end;
+      gap: 10px;
+      padding: 18px 8px 0;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #fff, #fbfbfa);
+    }
+
+    .bar {
+      flex: 1;
+      min-width: 16px;
+      border-radius: 6px 6px 0 0;
+      background: linear-gradient(180deg, #72ff9a, #050505);
+    }
+
+    .bar:nth-child(3n) { background: linear-gradient(180deg, #050505, #050505); }
+
+    .lower {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .map {
+      height: 210px;
+      border-radius: 8px;
+      background:
+        radial-gradient(circle at 22% 42%, #050505 0 5px, transparent 6px),
+        radial-gradient(circle at 48% 33%, #72ff9a 0 9px, transparent 10px),
+        radial-gradient(circle at 68% 58%, #050505 0 7px, transparent 8px),
+        radial-gradient(circle at 79% 28%, #72ff9a 0 6px, transparent 7px),
+        linear-gradient(135deg, #effff3, #ffffff);
+      border: 1px solid var(--border);
+      position: relative;
+    }
+
+    .map::before,
+    .map::after {
+      content: "";
+      position: absolute;
+      border: 1px solid rgba(5, 5, 5, 0.08);
+      border-radius: 50%;
+    }
+
+    .map::before { width: 180px; height: 90px; left: 68px; top: 54px; }
+    .map::after { width: 230px; height: 122px; right: 40px; bottom: 38px; }
+
+    .events {
+      display: grid;
+      gap: 9px;
+    }
+
+    .event {
+      display: grid;
+      grid-template-columns: 82px 1fr 72px;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      font-size: 13px;
+    }
+
+    .time {
+      color: #77746f;
+      font-family: "Fira Code", monospace;
+    }
+
+    .status {
+      justify-self: end;
+      color: var(--success);
+      font-weight: 800;
+    }
+
+    .warning { color: var(--accent); }
+    .bad { color: var(--danger); }
+
+    @media (max-width: 900px) {
+      .shell { width: min(100% - 24px, 720px); }
+      .navlinks { display: none; }
+      .hero,
+      .dash-grid,
+      .lower { grid-template-columns: 1fr; }
+      .dash-top,
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      h1 { font-size: 42px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <nav class="nav" aria-label="Primary navigation">
+      <div class="brand"><span class="mark">IF</span> InsightFlow</div>
+      <div class="navlinks">
+        <span>Live Metrics</span>
+        <span>Stories</span>
+        <span>Forecast</span>
+        <span>Integrations</span>
+      </div>
+      <button class="cta">Open demo</button>
+    </nav>
+
+    <section class="hero">
+      <div class="copy">
+        <span class="eyebrow">Realtime analytics OS</span>
+        <h1>Make dense data feel instantly readable.</h1>
+        <p class="lead">A visualization workspace for operations teams that blends executive clarity, live monitoring, and narrative analysis in one fast interface.</p>
+        <div class="actions">
+          <button class="cta">Start sandbox</button>
+          <button class="ghost">View report</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><strong>1.8M</strong><span>events / hour</span></div>
+          <div class="stat"><strong>42ms</strong><span>median query</span></div>
+          <div class="stat"><strong>99.98%</strong><span>pipeline health</span></div>
+        </div>
+      </div>
+
+      <div class="dashboard" aria-label="Analytics dashboard preview">
+        <div class="dash-top">
+          <div class="kpi"><label>Revenue Signal</label><b>$842K</b><div class="delta">+18.4% WoW</div></div>
+          <div class="kpi"><label>Active Regions</label><b>27</b><div class="delta">+4 new</div></div>
+          <div class="kpi"><label>Risk Alerts</label><b>12</b><div class="delta warning">3 elevated</div></div>
+          <div class="kpi"><label>Latency P95</label><b>184ms</b><div class="delta bad">+21ms</div></div>
+        </div>
+
+        <div class="dash-grid">
+          <section class="panel">
+            <h2>Traffic Forecast <span class="chip">live model</span></h2>
+            <div class="chart">
+              <svg class="line" viewBox="0 0 620 245" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="area" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0" stop-color="#72ff9a" stop-opacity="0.42" />
+                    <stop offset="1" stop-color="#72ff9a" stop-opacity="0" />
+                  </linearGradient>
+                </defs>
+                <path d="M0 186 C70 132 105 164 170 116 C235 68 280 104 342 80 C420 50 455 104 522 66 C570 38 594 42 620 28 L620 245 L0 245 Z" fill="url(#area)" />
+                <path d="M0 186 C70 132 105 164 170 116 C235 68 280 104 342 80 C420 50 455 104 522 66 C570 38 594 42 620 28" fill="none" stroke="#050505" stroke-width="5" stroke-linecap="round" />
+                <path d="M0 205 C84 170 130 190 190 144 C260 92 326 138 390 104 C455 70 516 128 620 82" fill="none" stroke="#72ff9a" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 9" />
+              </svg>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>Channel Mix <span class="chip">Q3</span></h2>
+            <div class="bar-wrap">
+              <div class="bar" style="height:44%"></div>
+              <div class="bar" style="height:63%"></div>
+              <div class="bar" style="height:82%"></div>
+              <div class="bar" style="height:52%"></div>
+              <div class="bar" style="height:74%"></div>
+              <div class="bar" style="height:91%"></div>
+              <div class="bar" style="height:68%"></div>
+              <div class="bar" style="height:58%"></div>
+            </div>
+          </section>
+        </div>
+
+        <div class="lower">
+          <section class="panel">
+            <h2>Regional Pulse <span class="chip">global</span></h2>
+            <div class="map"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Signal Timeline <span class="chip">last 12 min</span></h2>
+            <div class="events">
+              <div class="event"><span class="time">09:42:18</span><span>APAC conversion anomaly normalized</span><span class="status">stable</span></div>
+              <div class="event"><span class="time">09:39:04</span><span>Northwest demand spike detected</span><span class="status warning">watch</span></div>
+              <div class="event"><span class="time">09:35:51</span><span>Data warehouse sync completed</span><span class="status">synced</span></div>
+              <div class="event"><span class="time">09:31:22</span><span>Payment retry error rate increased</span><span class="status bad">risk</span></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

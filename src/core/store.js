@@ -2018,8 +2018,27 @@ export function createStore() {
       }
       allStatuses[monthKey] = monthStatuses;
 
+      const nextBudgets = { ...(data.budgets || {}) };
+      if (normalizedDecision === "adopted") {
+        const budgetCategory = String(actionPayload.budgetCategory || "").trim();
+        const budgetAmount = Number(actionPayload.budgetAmount || 0);
+        if (budgetCategory && Number.isFinite(budgetAmount) && budgetAmount > 0) {
+          const categoryBudgets = [...(nextBudgets.categoryBudgets || [])];
+          const existingIndex = categoryBudgets.findIndex((item) => item.category === budgetCategory);
+          const nextBudget = { category: budgetCategory, amount: Math.round(budgetAmount) };
+          if (existingIndex >= 0) categoryBudgets[existingIndex] = nextBudget;
+          else categoryBudgets.push(nextBudget);
+          nextBudgets.categoryBudgets = categoryBudgets;
+        }
+        const subscriptionMonthlyBudget = Number(actionPayload.subscriptionMonthlyBudget || 0);
+        if (Number.isFinite(subscriptionMonthlyBudget) && subscriptionMonthlyBudget > 0) {
+          nextBudgets.subscriptionMonthlyBudget = Math.round(subscriptionMonthlyBudget);
+          nextBudgets.subscriptionAnnualBudget = Math.round(subscriptionMonthlyBudget * 12);
+        }
+      }
+
       data.budgets = {
-        ...(data.budgets || {}),
+        ...nextBudgets,
         billAiActionDecisions: {
           ...((data.budgets || {}).billAiActionDecisions || {}),
           [monthKey]: nextMonthDecisions,
