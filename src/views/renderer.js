@@ -481,7 +481,7 @@ function dashboardActionAttributes(action = {}) {
 function dashboardMetricCard(label, value, hint, action, tone = "") {
   return `
     <button class="dashboard-metric-card ${tone ? `dashboard-metric-card--${tone}` : ""}" ${dashboardActionAttributes(action)} type="button">
-      <span>${escapeHtml(label)}</span>
+      <span><i></i>${escapeHtml(label)}</span>
       <strong>${escapeHtml(value)}</strong>
       <small>${escapeHtml(hint)}</small>
     </button>
@@ -497,6 +497,16 @@ function dashboardQueueItem(title, text, actionLabel, action, tone = "normal") {
       </div>
       <button class="ghost-button" ${dashboardActionAttributes(action)} type="button">${escapeHtml(actionLabel)}</button>
     </article>
+  `;
+}
+
+function dashboardModuleCard(label, value, hint, action, tone = "normal") {
+  return `
+    <button class="dashboard-module-card dashboard-module-card--${escapeHtml(tone)}" ${dashboardActionAttributes(action)} type="button">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(hint)}</small>
+    </button>
   `;
 }
 
@@ -599,6 +609,17 @@ function renderDashboard(elements, data, ui, recentViews, store) {
       : financeSummary.balance < 0
         ? "本月现金流为负，优先复核大额支出。"
         : `本月结余 ${formatCurrency(financeSummary.balance)}，未来计划 ${formatCurrency(futureExpense)}。`;
+  const healthScore =
+    healthStatus === "风险"
+      ? 42
+      : healthStatus === "关注"
+        ? 68
+        : healthStatus === "待补录"
+          ? 56
+          : 86;
+  const subscriptionTone = subscriptionsOverview.urgent?.length ? "risk" : subscriptionsOverview.upcoming?.length ? "watch" : "good";
+  const favorTone = Math.abs(favorStats.balance || 0) > Math.max(financeSummary.income * 0.25, 500) ? "watch" : "good";
+  const taskTone = overdueTasks.length ? "risk" : pendingTasks.length > 5 ? "watch" : "good";
   const queueItems = [
     forecastPrimaryRisk ? dashboardQueueItem("预测风险", `${financeForecast.nextMonth.month} · ${forecastPrimaryRisk.title}`, "处理预告", { billActionsMonth: month }, forecastTone) : "",
     openBillActions ? dashboardQueueItem("本月行动", `${doneBillActions}/${billActions.length} 已完成${carriedBillActions ? `，${carriedBillActions} 项上月延续` : `，${doingBillActions} 项进行中`}`, "处理行动", { billActionsMonth: month }, actionTone) : "",
@@ -612,9 +633,18 @@ function renderDashboard(elements, data, ui, recentViews, store) {
   elements.contentArea.innerHTML = `
     <section class="dashboard-command">
       <div class="dashboard-command__main">
-        <span class="eyebrow">COMMAND CENTER</span>
-        <h2>家庭财务状态：${escapeHtml(healthStatus)}</h2>
+        <div class="dashboard-command__kicker">
+          <span class="eyebrow">COMMAND CENTER</span>
+          <b>${escapeHtml(month)}</b>
+        </div>
+        <h2>今天优先关注：${escapeHtml(topFinanceRisk.title)}</h2>
         <p>${escapeHtml(decisionText)}</p>
+        <div class="dashboard-command__facts">
+          <span>现金流 <strong>${formatCurrency(financeSummary.balance)}</strong></span>
+          <span>下月预计 <strong>${formatCurrency(financeForecast.nextMonth.balance)}</strong></span>
+          <span>人情差额 <strong>${formatCurrency(favorStats.balance || 0)}</strong></span>
+          <span>待处理 <strong>${escapeHtml(String(queueItems.length))} 项</strong></span>
+        </div>
         <div class="dashboard-command__actions">
           <button class="primary-button" data-dashboard-open-ledger="${escapeHtml(month)}" type="button">复核完整流水</button>
           <button class="ghost-button" data-page-jump="bills" type="button">进入生活收支</button>
@@ -622,9 +652,10 @@ function renderDashboard(elements, data, ui, recentViews, store) {
         </div>
       </div>
       <aside class="dashboard-command__status dashboard-command__status--${healthStatus === "风险" ? "risk" : healthStatus === "关注" ? "watch" : "good"}">
-        <span>${escapeHtml(month)} 月度判断</span>
+        <span>${escapeHtml(month)} 综合评分</span>
         <strong>${escapeHtml(healthStatus)}</strong>
-        <small>支出率 ${financeSummary.income > 0 ? `${Math.round(financeSummary.expenseRate * 100)}%` : "缺少收入"} · ${excludedBills.length} 条不计入</small>
+        <div class="dashboard-health-meter" style="--dashboard-health:${healthScore}%"><i></i></div>
+        <small>${healthScore} / 100 · 支出率 ${financeSummary.income > 0 ? `${Math.round(financeSummary.expenseRate * 100)}%` : "缺少收入"} · ${excludedBills.length} 条不计入</small>
       </aside>
     </section>
     <div class="dashboard-metric-grid">
@@ -635,6 +666,12 @@ function renderDashboard(elements, data, ui, recentViews, store) {
       ${dashboardMetricCard("行动进度", `${doneBillActions}/${billActions.length} 已完成`, `${openBillActions} 项待推进${carriedBillActions ? ` · ${carriedBillActions} 项延续` : ""}`, { billActionsMonth: month }, actionTone)}
       ${dashboardMetricCard("本月现金流", formatCurrency(financeSummary.balance), `收入 ${formatCurrency(financeSummary.income)} / 支出 ${formatCurrency(financeSummary.expense)}`, { page: "bills" }, financeSummary.balance < 0 ? "risk" : "good")}
     </div>
+    <section class="dashboard-system-grid">
+      ${dashboardModuleCard("生活收支", healthStatus, `结余 ${formatCurrency(financeSummary.balance)} · 预算 ${budgetPace.label}`, { page: "bills" }, healthTone)}
+      ${dashboardModuleCard("人情往来", formatCurrency(Math.abs(favorStats.balance || 0)), balanceCopy, { page: "favors" }, favorTone)}
+      ${dashboardModuleCard("订阅续费", `${subscriptionsOverview.upcoming?.length || 0} 项`, `月均 ${formatCurrency(subscriptionsOverview.estimatedMonthlyCost)}`, { page: "subscriptions" }, subscriptionTone)}
+      ${dashboardModuleCard("事项推进", `${progress}%`, `${pendingTasks.length} 项未完成${overdueTasks.length ? ` · ${overdueTasks.length} 项逾期` : ""}`, { page: "tasks" }, taskTone)}
+    </section>
     ${
       notificationSettings.siteEnabled && subscriptionSummary.total
         ? `<section class="panel notification-panel">
