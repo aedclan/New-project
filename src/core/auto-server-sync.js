@@ -1,4 +1,4 @@
-import { loadServerSyncState, pushServerData } from "./server-sync.js";
+import { pushServerData } from "./server-sync.js";
 
 export function createAutoServerSync(app, authController) {
   let timer = null;
@@ -7,9 +7,7 @@ export function createAutoServerSync(app, authController) {
   let lastError = "";
 
   async function pushNow() {
-    const syncState = loadServerSyncState();
-    const canUseServerAuth = Boolean(authController.isServerAuthenticated);
-    if ((!canUseServerAuth && !syncState.autoEnabled) || (!syncState.hasToken && !canUseServerAuth) || !authController.isAuthenticated) return false;
+    if (!authController.isAuthenticated || !authController.isServerAuthenticated) return false;
 
     if (running) {
       queued = true;

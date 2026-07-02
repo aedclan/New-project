@@ -3814,6 +3814,7 @@ dialog.auth-modal::backdrop {
 
 .auth-panel:has(.auth-register-field:not([hidden])) .modal-scroll {
   gap: 8px;
+  align-content: start;
 }
 
 .auth-panel:has(.auth-register-field:not([hidden])) label {
@@ -3832,6 +3833,16 @@ dialog.auth-modal::backdrop {
 .auth-panel:has(.auth-register-field:not([hidden])) .modal-actions .primary-button,
 .auth-panel:has(.auth-register-field:not([hidden])) .modal-actions .ghost-button {
   min-height: 40px;
+}
+
+.auth-panel:has(.auth-register-field:not([hidden])) .hint {
+  min-height: 30px;
+  padding: 0 8px;
+  line-height: 1.45;
+  overflow: visible;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 @media (max-width: 520px) {

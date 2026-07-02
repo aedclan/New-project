@@ -288,7 +288,6 @@ if (renderer.includes('renderControls(elements, data, ui, "subscriptions")')) {
 }
 
 const serverSyncSnippets = [
-  "SERVER_SYNC_TOKEN_KEY",
   "loadServerSyncState",
   "checkServerSyncStatus",
   "pushServerData",
@@ -302,7 +301,6 @@ const serverSyncSnippets = [
   "/api/data/status",
   "/api/data/events",
   "/api/data",
-  "PERSONAL_HUB_SYNC_TOKEN",
   "PERSONAL_HUB_DATA_FILE",
   "PERSONAL_HUB_BACKUP_DIR",
   "PERSONAL_HUB_BACKUP_KEEP",

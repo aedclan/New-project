@@ -1,4 +1,6 @@
-import { SERVER_SYNC_AUTO_KEY, SERVER_SYNC_LAST_PUSH_KEY, SERVER_SYNC_TOKEN_KEY } from "../config/constants.js";
+import { SERVER_SYNC_AUTO_KEY, SERVER_SYNC_LAST_PUSH_KEY } from "../config/constants.js";
+
+const legacyServerSyncTokenKey = "personal-hub-server-sync-token";
 
 const collectionKeys = ["tasks", "bills", "notes", "collections", "subscriptions", "contacts", "favorEvents", "bookmarks"];
 const collectionLabels = {
@@ -12,22 +14,8 @@ const collectionLabels = {
   bookmarks: "收藏",
 };
 
-function getStoredToken() {
-  return localStorage.getItem(SERVER_SYNC_TOKEN_KEY) || "";
-}
-
-function saveStoredToken(token) {
-  const value = String(token || "").trim();
-  if (value) {
-    localStorage.setItem(SERVER_SYNC_TOKEN_KEY, value);
-  } else {
-    localStorage.removeItem(SERVER_SYNC_TOKEN_KEY);
-  }
-  return value;
-}
-
-function resolveToken(token) {
-  return String(token || "").trim() || getStoredToken();
+function clearLegacyStoredToken() {
+  localStorage.removeItem(legacyServerSyncTokenKey);
 }
 
 async function readJsonResponse(response) {
@@ -38,10 +26,8 @@ async function readJsonResponse(response) {
   return payload;
 }
 
-function authHeaders(token, includeJson = true) {
-  const headers = includeJson ? { "Content-Type": "application/json" } : {};
-  if (token) headers["X-Personal-Hub-Token"] = token;
-  return headers;
+function authHeaders(includeJson = true) {
+  return includeJson ? { "Content-Type": "application/json" } : {};
 }
 
 function itemTimestamp(item) {
@@ -195,10 +181,8 @@ export function buildHubDataMergeReport(localData = {}, serverData = {}) {
 }
 
 export function loadServerSyncState() {
-  const token = getStoredToken();
+  clearLegacyStoredToken();
   return {
-    hasToken: Boolean(token),
-    maskedToken: token ? `${token.slice(0, 4)}${"*".repeat(Math.max(token.length - 4, 4))}` : "",
     autoEnabled: localStorage.getItem(SERVER_SYNC_AUTO_KEY) === "true",
     lastPushedAt: localStorage.getItem(SERVER_SYNC_LAST_PUSH_KEY) || "",
   };
@@ -213,12 +197,11 @@ export async function checkServerSyncStatus() {
   return readJsonResponse(response);
 }
 
-export async function pushServerData(data, token) {
-  const savedToken = resolveToken(token);
-  if (String(token || "").trim()) saveStoredToken(savedToken);
+export async function pushServerData(data) {
+  clearLegacyStoredToken();
   const response = await fetch("/api/data", {
     method: "PUT",
-    headers: authHeaders(savedToken),
+    headers: authHeaders(),
     credentials: "same-origin",
     body: JSON.stringify({ data }),
   });
@@ -227,11 +210,10 @@ export async function pushServerData(data, token) {
   return result;
 }
 
-export async function pullServerData(token) {
-  const savedToken = resolveToken(token);
-  if (String(token || "").trim()) saveStoredToken(savedToken);
+export async function pullServerData() {
+  clearLegacyStoredToken();
   const response = await fetch("/api/data", {
-    headers: authHeaders(savedToken, false),
+    headers: authHeaders(false),
     credentials: "same-origin",
   });
   return readJsonResponse(response);

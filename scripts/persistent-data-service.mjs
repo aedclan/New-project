@@ -3,7 +3,6 @@ import { dirname, join, resolve } from "node:path";
 import { getCurrentUser } from "./auth-service.mjs";
 
 const dataFilePath = resolve(process.env.PERSONAL_HUB_DATA_FILE || "/app/data/personal-hub-data.json");
-const syncToken = String(process.env.PERSONAL_HUB_SYNC_TOKEN || "").trim();
 const dataEventClients = new Map();
 
 function jsonResponse(response, status, payload) {
@@ -12,12 +11,7 @@ function jsonResponse(response, status, payload) {
 }
 
 function isAuthorized(request) {
-  if (getCurrentUser(request)) return true;
-  if (!syncToken) return false;
-  const auth = String(request.headers.authorization || "");
-  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  const headerToken = String(request.headers["x-personal-hub-token"] || "").trim();
-  return bearer === syncToken || headerToken === syncToken;
+  return Boolean(getCurrentUser(request));
 }
 
 function readRequestJson(request) {
@@ -133,7 +127,7 @@ export async function handlePersistentDataRequest(request, response) {
     const authenticated = Boolean(user);
     jsonResponse(response, 200, {
       ok: true,
-      configured: Boolean(syncToken || authenticated),
+      configured: authenticated,
       authenticated,
       hasData: existsSync(filePath) || Boolean(legacyFilePath && existsSync(legacyFilePath)),
       dataFile: filePath,
@@ -145,9 +139,9 @@ export async function handlePersistentDataRequest(request, response) {
   if (url.pathname !== "/api/data") return false;
 
   if (!isAuthorized(request)) {
-    jsonResponse(response, syncToken ? 401 : 503, {
+    jsonResponse(response, 401, {
       ok: false,
-      message: syncToken ? "同步密钥不正确。" : "服务器未配置 PERSONAL_HUB_SYNC_TOKEN，暂不能使用服务器同步。",
+      message: "请先登录服务器账号后再使用账号同步。",
     });
     return true;
   }

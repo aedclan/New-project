@@ -2,6 +2,7 @@
 import { checkServerSession, loginServer, logoutServer, registerServer, requestPasswordReset, resendVerificationEmail, sendRegisterEmailCode } from "./server-auth.js";
 
 export function createAuthController(elements) {
+  const AUTH_FORM_MODE_KEY = "personal-hub-auth-form-mode";
   const authModal = document.querySelector("#authModal");
   const authForm = authModal.querySelector("#authForm");
   const authButton = document.querySelector("#authButton");
@@ -15,13 +16,14 @@ export function createAuthController(elements) {
   const sendRegisterCodeButton = authModal.querySelector("[data-send-register-code]");
   let registerCodeTimer = null;
   const isLocalDemoHost = ["localhost", "127.0.0.1", "::1", ""].includes(window.location.hostname);
+  const savedFormMode = sessionStorage.getItem(AUTH_FORM_MODE_KEY);
 
   const state = {
     isAuthenticated: localStorage.getItem(AUTH_SESSION_KEY) === "true",
     serverConfigured: false,
     registrationEnabled: false,
     registrationCodeRequired: false,
-    formMode: "login",
+    formMode: savedFormMode === "register" ? "register" : "login",
     authMode: "local",
     user: localStorage.getItem(AUTH_SESSION_KEY) === "true" ? { username: DEMO_USER.username } : null,
     sessionChecked: false,
@@ -56,6 +58,7 @@ export function createAuthController(elements) {
 
   function setFormMode(mode) {
     state.formMode = mode === "register" ? "register" : "login";
+    sessionStorage.setItem(AUTH_FORM_MODE_KEY, state.formMode);
     authModeSwitch?.querySelectorAll("[data-auth-mode]").forEach((button) => {
       button.textContent = button.dataset.authMode === "register" ? "注册" : "登录";
       button.classList.toggle("is-active", button.dataset.authMode === state.formMode);
@@ -80,7 +83,7 @@ export function createAuthController(elements) {
       authHint.textContent = state.serverConfigured
         ? state.registrationCodeRequired
           ? "注册需要输入服务器配置的邀请码。"
-          : "使用邮箱创建服务器账号后，可以按账号隔离数据并跨设备同步。"
+          : "邮箱账号会按账号隔离数据，并支持跨设备同步。"
         : "本地演示模式不能创建真实账号，需要在 VPS 开启注册后使用。";
       return;
     }
@@ -105,7 +108,7 @@ export function createAuthController(elements) {
     }, 1000);
   }
 
-  function openLogin(mode = "login") {
+  function openLogin(mode = state.formMode) {
     authForm.reset();
     setFormMode(mode);
     updateHint();
@@ -122,12 +125,12 @@ export function createAuthController(elements) {
     localStorage.removeItem(AUTH_SESSION_KEY);
     renderAuthState();
     notifyServerLogout();
-    openLogin();
+    openLogin("login");
   }
 
   function requireAuth() {
     if (state.isAuthenticated) return true;
-    openLogin();
+    openLogin("login");
     return false;
   }
 
@@ -183,7 +186,7 @@ export function createAuthController(elements) {
       await logout();
       return;
     }
-    openLogin();
+    openLogin("login");
   });
 
   authModeSwitch?.addEventListener("click", (event) => {

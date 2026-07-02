@@ -12,7 +12,6 @@ services:
       FINANCE_AI_API_KEY: ${FINANCE_AI_API_KEY:-}
       FINANCE_AI_MODEL: ${FINANCE_AI_MODEL:-}
       FINANCE_AI_API_URL: ${FINANCE_AI_API_URL:-https://api.openai.com/v1/chat/completions}
-      PERSONAL_HUB_SYNC_TOKEN: ${PERSONAL_HUB_SYNC_TOKEN:-}
       PERSONAL_HUB_DATA_FILE: /app/data/personal-hub-data.json
       PERSONAL_HUB_BACKUP_DIR: /app/data/backups
       PERSONAL_HUB_BACKUP_KEEP: ${PERSONAL_HUB_BACKUP_KEEP:-14}
