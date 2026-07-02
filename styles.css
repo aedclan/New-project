@@ -22677,7 +22677,16 @@ body:not(.dark) .page-subscriptions .subscription-control-hero {
 }
 
 .topbar .nav-item span:last-child {
+  display: inline-flex;
   opacity: 1;
+  visibility: visible;
+  transform: none;
+  max-width: none;
+}
+
+.topbar .nav-item span {
+  opacity: 1;
+  visibility: visible;
   transform: none;
 }
 
