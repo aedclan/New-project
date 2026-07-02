@@ -21,6 +21,10 @@ function clearLegacyStoredToken() {
 async function readJsonResponse(response) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
+    const error = new Error(payload.message || `请求失败：${response.status}`);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
     throw new Error(payload.message || `请求失败：${response.status}`);
   }
   return payload;

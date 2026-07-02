@@ -52,10 +52,30 @@ app.autoServerSync = autoServerSync;
 app.realtimeSync = realtimeSync;
 app.store.setChangeHandler(() => autoServerSync.schedule());
 
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function pullServerDataAfterLogin() {
+  let lastError = null;
+  for (const delay of [0, 250, 800]) {
+    if (delay) await wait(delay);
+    try {
+      return await pullServerData();
+    } catch (error) {
+      lastError = error;
+      if (error.status !== 401) throw error;
+    }
+  }
+  throw lastError;
+}
+
 window.addEventListener("personalHub:serverLogin", async () => {
+  renderer.render();
   try {
-    const result = await pullServerData();
+    const result = await pullServerDataAfterLogin();
     if (!result.data) {
+      realtimeSync.refreshConnection();
       return;
     }
     app.store.importData(result.data);
@@ -63,6 +83,10 @@ window.addEventListener("personalHub:serverLogin", async () => {
     realtimeSync.refreshConnection();
     console.info(`Personal Hub server data restored: ${result.savedAt || "unknown time"}`);
   } catch (error) {
+    if (error.status === 401) {
+      console.warn("登录成功，但浏览器尚未带上服务器会话 Cookie，已跳过自动恢复。");
+      return;
+    }
     window.alert(error.message || "登录成功，但自动读取服务器数据失败。");
   }
 });

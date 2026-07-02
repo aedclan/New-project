@@ -363,7 +363,7 @@ export function createAuthController(elements) {
     authHint.textContent = "请先登录或注册账号，登录后才能进入工作台。";
   });
 
-  setFormMode("login");
+  setFormMode(state.formMode);
   renderAuthState();
   if (!state.isAuthenticated) window.setTimeout(() => openLogin(), 0);
 
