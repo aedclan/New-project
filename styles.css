@@ -22676,6 +22676,25 @@ body:not(.dark) .page-subscriptions .subscription-control-hero {
     linear-gradient(180deg, #ffffff 0%, #f6f7f4 100%);
 }
 
+.topbar .nav-item span:last-child {
+  opacity: 1;
+  transform: none;
+}
+
+body:not(.dark) .topbar .nav-item.active,
+body:not(.dark) .topbar .nav-item[aria-current="page"] {
+  border-color: rgba(17, 24, 21, 0.88);
+  background: #111815;
+  color: #ffffff;
+}
+
+body:not(.dark) .topbar .nav-item.active span,
+body:not(.dark) .topbar .nav-item[aria-current="page"] span,
+body:not(.dark) .topbar .nav-item.active .nav-icon,
+body:not(.dark) .topbar .nav-item[aria-current="page"] .nav-icon {
+  color: #ffffff;
+}
+
 body:not(.dark) .subscription-control-hero__decision,
 body:not(.dark) .page-subscriptions .subscription-control-hero__decision {
   border-color: rgba(47, 143, 100, 0.28);
