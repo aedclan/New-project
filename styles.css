@@ -22331,4 +22331,381 @@ dialog::backdrop,
   }
 }
 
+/* Favors entry dock final layout: remove empty vertical area and align form groups */
+@media (min-width: 1081px) {
+  .page-favors .favor-dashboard-layout__side {
+    bottom: 18px;
+    height: auto !important;
+    max-height: none;
+    overflow: hidden;
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-section {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-panel {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 12px;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-head {
+    grid-template-columns: 1fr;
+    align-items: start;
+    margin: -12px -12px 0;
+    padding: 14px 14px 10px;
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-head h2 {
+    font-size: 17px;
+    line-height: 1.18;
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-head p {
+    margin-top: 3px;
+    color: #64748b;
+    font-size: 11.5px;
+    line-height: 1.35;
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-grid {
+    grid-template-columns: 1fr;
+    align-content: start;
+    gap: 12px;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-card {
+    gap: 9px;
+    padding: 12px;
+    border-radius: 8px;
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-card--person,
+  .page-favors .favor-dashboard-layout__side .favor-entry-card--event {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-card__head,
+  .page-favors .favor-dashboard-layout__side .choice-field {
+    grid-column: 1 / -1;
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-card--event .form-grid,
+  .page-favors .favor-dashboard-layout__side .favor-entry-card--event > label {
+    grid-column: 1 / -1;
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-card--event .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .page-favors .favor-dashboard-layout__side .choice-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .page-favors .favor-dashboard-layout__side .choice-grid--compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .page-favors .favor-dashboard-layout__side .choice-pill span {
+    min-height: 28px;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+
+  .page-favors .favor-dashboard-layout__side input,
+  .page-favors .favor-dashboard-layout__side select {
+    min-height: 32px !important;
+    height: 32px !important;
+    font-size: 12px;
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-actions {
+    margin: 0 -12px -12px;
+    padding: 10px 12px 12px;
+    border-top: 1px solid #e5e7eb;
+    background: #ffffff;
+  }
+
+  .page-favors .favor-dashboard-layout__side .favor-entry-actions .primary-button {
+    width: 100%;
+    min-height: 38px;
+    border-radius: 8px;
+  }
+}
+
+/* Align fixed right docks with the content start, leaving a consistent gap below top navigation */
+@media (min-width: 1081px) {
+  .page-bills .bill-dashboard-layout__side,
+  .page-subscriptions .subscription-control-side,
+  .page-favors .favor-dashboard-layout__side {
+    top: 98px !important;
+  }
+}
+
+/* Favors insight area: balanced two-column layout with full-width reminders */
+@media (min-width: 1081px) {
+  .page-favors .favor-insight-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .page-favors .favor-insight-panel {
+    min-height: 0;
+    padding: 16px;
+  }
+
+  .page-favors .favor-insight-panel--reminders {
+    grid-column: 1 / -1;
+  }
+
+  .page-favors .favor-insight-panel--reminders .favor-reminder-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .page-favors .favor-insight-panel--reminders .favor-reminder-row {
+    min-height: 72px;
+  }
+}
+
+/* Favors insight compact cards: reduce oversized inner card groups */
+@media (min-width: 1081px) {
+  .page-favors .favor-insight-panel {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .page-favors .favor-insight-panel .panel-head {
+    gap: 8px;
+    padding-bottom: 8px;
+  }
+
+  .page-favors .favor-insight-panel .panel-head h2 {
+    font-size: 16px;
+  }
+
+  .page-favors .favor-insight-panel .results-count {
+    min-height: 26px;
+    padding: 0 9px;
+    font-size: 11px;
+  }
+
+  .page-favors .favor-table-list,
+  .page-favors .favor-reminder-list {
+    gap: 6px;
+  }
+
+  .page-favors .favor-table-row,
+  .page-favors .favor-reminder-row {
+    min-height: 44px;
+    gap: 7px;
+    padding: 7px 9px;
+    border-radius: 8px;
+  }
+
+  .page-favors .favor-table-row {
+    grid-template-columns: minmax(74px, 0.55fr) minmax(116px, 0.8fr) auto;
+  }
+
+  .page-favors .favor-table-row__main {
+    gap: 2px;
+  }
+
+  .page-favors .favor-table-row__flow {
+    gap: 6px;
+  }
+
+  .page-favors .favor-table-row__main strong,
+  .page-favors .favor-reminder-row strong {
+    font-size: 14px;
+    line-height: 1.18;
+  }
+
+  .page-favors .favor-table-row__main span,
+  .page-favors .favor-table-row__flow span,
+  .page-favors .favor-reminder-row span,
+  .page-favors .favor-reminder-row p {
+    font-size: 11px;
+    line-height: 1.25;
+  }
+
+  .page-favors .favor-table-row b {
+    min-width: 64px;
+    padding: 5px 9px;
+    font-size: 12px;
+  }
+
+  .page-favors .favor-insight-panel--reminders .favor-reminder-row {
+    min-height: 50px;
+  }
+}
+
+/* Global low-saturation palette pass: cleaner surfaces with sharper semantic contrast */
+body:not(.dark) {
+  --bg: #f6f7f4;
+  --surface: #ffffff;
+  --surface-2: #f1f4ef;
+  --surface-3: #e8eee7;
+  --card: #ffffff;
+  --text: #111815;
+  --muted: #66736d;
+  --weak: #94a19b;
+  --line: #dfe6df;
+  --strong-line: #c8d3cc;
+  --accent: #2f7d5b;
+  --accent-2: #2f5f8f;
+  --success: #2f8f64;
+  --success-strong: #1f5f45;
+  --warning: #a86f2a;
+  --danger: #b84b57;
+  --shadow: 0 18px 52px rgba(31, 41, 35, 0.07);
+  --soft-shadow: 0 10px 28px rgba(31, 41, 35, 0.065);
+  --focus-ring: 0 0 0 3px rgba(47, 125, 91, 0.16);
+  --danger-ring: 0 0 0 3px rgba(184, 75, 87, 0.16);
+}
+
+body.dark {
+  --accent: #78a88e;
+  --accent-2: #7e9fbd;
+  --success: #78a88e;
+  --success-strong: #a9c9b6;
+  --warning: #c49a5d;
+  --danger: #d07b83;
+}
+
+body:not(.dark) .page-bills {
+  --bill-income: #b84b57;
+  --bill-expense: #2f8f64;
+  --bill-balance: #2f5f8f;
+  --bill-risk: #b84b57;
+  --bill-watch: #a86f2a;
+  --bill-budget: #6b5b95;
+  --bill-fixed: #5c6a64;
+  --bill-neutral: #111815;
+  --bill-card-muted: #f4f6f2;
+  --bill-card-line: #dfe6df;
+  --bill-card-line-strong: #c8d3cc;
+}
+
+body:not(.dark) .page-subscriptions {
+  --subscription-primary: #111815;
+  --subscription-primary-strong: #111815;
+  --subscription-accent: #2f8f64;
+  --subscription-accent-soft: #eaf3ee;
+  --subscription-blue: #2f5f8f;
+  --subscription-amber: #a86f2a;
+  --subscription-red: #b84b57;
+  --subscription-panel: #ffffff;
+  --subscription-canvas: #f6f7f4;
+  --subscription-muted: #66736d;
+  --subscription-line: #dfe6df;
+}
+
+body:not(.dark) .panel,
+body:not(.dark) .content-card,
+body:not(.dark) .stat-card,
+body:not(.dark) .table-wrap,
+body:not(.dark) .subscription-row,
+body:not(.dark) .favor-entry-card,
+body:not(.dark) .favor-table-row,
+body:not(.dark) .favor-reminder-row,
+body:not(.dark) .bill-action-item,
+body:not(.dark) .bill-risk-item {
+  border-color: var(--line);
+  background-color: rgba(255, 255, 255, 0.9);
+  box-shadow: var(--soft-shadow);
+}
+
+body:not(.dark) .tag,
+body:not(.dark) .results-count,
+body:not(.dark) .choice-pill span,
+body:not(.dark) .ghost-button {
+  border-color: var(--line);
+  background: #fbfcfa;
+  color: #33423b;
+}
+
+body:not(.dark) .primary-button,
+body:not(.dark) .topbar .nav-item.active,
+body:not(.dark) .mobile-tab.active {
+  border-color: #111815;
+  background: #111815;
+  color: #ffffff;
+  box-shadow: 0 12px 28px rgba(17, 24, 21, 0.16);
+}
+
+body:not(.dark) .choice-pill input:checked + span,
+body:not(.dark) .bill-timeline-tabs button.is-active,
+body:not(.dark) .bill-trend-tabs button.is-active,
+body:not(.dark) .bill-trend-control-group button.is-active,
+body:not(.dark) .filter-chip-row button.active,
+body:not(.dark) .nav-item.active {
+  border-color: rgba(47, 143, 100, 0.34);
+  background: rgba(47, 143, 100, 0.11);
+  color: #111815;
+}
+
+body:not(.dark) .subscription-control-hero,
+body:not(.dark) .page-subscriptions .subscription-control-hero {
+  background:
+    radial-gradient(circle at 80% 18%, rgba(47, 143, 100, 0.18), transparent 19rem),
+    linear-gradient(180deg, #ffffff 0%, #f6f7f4 100%);
+}
+
+body:not(.dark) .subscription-control-hero__decision,
+body:not(.dark) .page-subscriptions .subscription-control-hero__decision {
+  border-color: rgba(47, 143, 100, 0.28);
+  background: linear-gradient(145deg, rgba(47, 143, 100, 0.18), rgba(235, 243, 238, 0.9));
+}
+
+body:not(.dark) .page-favors .favor-table-row--received,
+body:not(.dark) .page-favors .favor-table-row--given,
+body:not(.dark) .page-favors .favor-period-card,
+body:not(.dark) .page-favors .favor-month-row {
+  --favor-row-accent: #2f8f64;
+  --favor-row-soft: rgba(47, 143, 100, 0.11);
+}
+
+body:not(.dark) .page-favors .favor-table-row--given,
+body:not(.dark) .page-favors .favor-period-card--given,
+body:not(.dark) .page-favors .favor-month-row--given {
+  --favor-row-accent: #2f5f8f;
+  --favor-row-soft: rgba(47, 95, 143, 0.1);
+}
+
+body:not(.dark) .ui-alert--danger,
+body:not(.dark) .ui-state--danger,
+body:not(.dark) .tag-danger {
+  border-color: rgba(184, 75, 87, 0.28);
+  background: rgba(184, 75, 87, 0.08);
+  color: #9f3341;
+}
+
+body:not(.dark) .ui-alert--warning,
+body:not(.dark) .ui-state--warning {
+  border-color: rgba(168, 111, 42, 0.3);
+  background: rgba(168, 111, 42, 0.08);
+  color: #8a5b22;
+}
+
+body:not(.dark) .ui-alert--success,
+body:not(.dark) .ui-state--success {
+  border-color: rgba(47, 143, 100, 0.28);
+  background: rgba(47, 143, 100, 0.08);
+  color: #236d4c;
+}
+
 

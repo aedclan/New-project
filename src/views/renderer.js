@@ -5554,7 +5554,6 @@ function renderFavors(elements, data, ui, store) {
             <h2>新增往来与人物</h2>
             <p>先确认人物，再记录本次收送、金额和背景。</p>
           </div>
-          <button class="primary-button" type="submit">保存往来</button>
         </div>
         <div class="favor-entry-grid">
           <div class="favor-entry-card favor-entry-card--person">
@@ -5638,6 +5637,9 @@ function renderFavors(elements, data, ui, store) {
               <input name="giftName" placeholder="可留空，例如 红包 / 水果礼盒" />
             </label>
           </div>
+        </div>
+        <div class="favor-entry-actions">
+          <button class="primary-button" type="submit">保存往来</button>
         </div>
           </form>
         </section>
