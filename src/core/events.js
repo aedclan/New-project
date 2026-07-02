@@ -29,6 +29,7 @@ import { buildFinanceAiSummary, requestFinanceAiAnalysis, requestFinanceQuestion
 import { renderMarkdown } from "./utils.js";
 
 const FINANCE_QA_FLOAT_POSITION_KEY = "personal-hub-finance-qa-float-position";
+const FINANCE_QA_AVATAR_KEY = "personal-hub-finance-qa-avatar";
 
 function createDefaultFilters() {
   return {
@@ -315,6 +316,31 @@ export function bindEvents(app, elements, renderer, formController, authControll
     button.style.bottom = "auto";
   }
 
+  function applyFinanceQaAvatar(root = document) {
+    const avatarUrl = localStorage.getItem(FINANCE_QA_AVATAR_KEY) || "";
+    root.querySelectorAll("[data-finance-qa-avatar]").forEach((avatar) => {
+      avatar.classList.toggle("has-custom-avatar", Boolean(avatarUrl));
+      avatar.style.backgroundImage = avatarUrl ? `url("${avatarUrl.replace(/"/g, "%22")}")` : "";
+    });
+  }
+
+  function saveFinanceQaAvatar(file) {
+    if (!file || !file.type?.startsWith("image/")) {
+      window.alert("请选择图片、GIF 或 WebP 作为头像。");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      window.alert("头像图片建议小于 2MB，避免本地存储过大。");
+      return;
+    }
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      localStorage.setItem(FINANCE_QA_AVATAR_KEY, String(reader.result || ""));
+      applyFinanceQaAvatar();
+    });
+    reader.readAsDataURL(file);
+  }
+
   function bindFinanceQaFloatDrag() {
     let dragState = null;
 
@@ -376,7 +402,10 @@ export function bindEvents(app, elements, renderer, formController, authControll
   const renderWithFinanceQaFloat = renderer.render.bind(renderer);
   renderer.render = () => {
     renderWithFinanceQaFloat();
-    requestAnimationFrame(applyFinanceQaFloatPosition);
+    requestAnimationFrame(() => {
+      applyFinanceQaFloatPosition();
+      applyFinanceQaAvatar();
+    });
   };
   bindFinanceQaFloatDrag();
 
@@ -1018,11 +1047,21 @@ export function bindEvents(app, elements, renderer, formController, authControll
     dialog.innerHTML = `
       <section class="modal-panel finance-qa-panel">
         <div class="drawer-head">
-          <div>
-            <span class="eyebrow">FINANCE Q&A</span>
-            <h2>${escapeHtml(month)} 财务问答助手</h2>
+          <div class="finance-qa-title">
+            <span class="finance-qa-mascot finance-qa-mascot--panel" data-finance-qa-avatar><i></i></span>
+            <div>
+              <span class="eyebrow">FINANCE Q&A</span>
+              <h2>${escapeHtml(month)} 财务问答助手</h2>
+            </div>
           </div>
-          <button class="icon-button" data-close-finance-qa type="button" aria-label="关闭">×</button>
+          <div class="finance-qa-head-actions">
+            <label class="ghost-button finance-qa-avatar-upload">
+              更换头像
+              <input data-finance-qa-avatar-input type="file" accept="image/png,image/jpeg,image/gif,image/webp" />
+            </label>
+            <button class="ghost-button" data-finance-qa-avatar-reset type="button">恢复默认</button>
+            <button class="icon-button" data-close-finance-qa type="button" aria-label="关闭">×</button>
+          </div>
         </div>
         <form class="finance-qa-form" data-finance-qa-form>
           <label>
@@ -1048,10 +1087,19 @@ export function bindEvents(app, elements, renderer, formController, authControll
     };
     dialog.addEventListener("click", (event) => {
       if (event.target === dialog || event.target.closest("[data-close-finance-qa]")) close();
+      if (event.target.closest("[data-finance-qa-avatar-reset]")) {
+        localStorage.removeItem(FINANCE_QA_AVATAR_KEY);
+        applyFinanceQaAvatar();
+      }
       const sample = event.target.closest("[data-finance-qa-sample]");
       if (sample) {
         dialog.querySelector('[name="question"]').value = sample.dataset.financeQaSample || "";
       }
+    });
+    dialog.addEventListener("change", (event) => {
+      if (!event.target.matches("[data-finance-qa-avatar-input]")) return;
+      saveFinanceQaAvatar(event.target.files?.[0]);
+      event.target.value = "";
     });
     dialog.addEventListener("submit", async (event) => {
       if (!event.target.matches("[data-finance-qa-form]")) return;
@@ -1079,6 +1127,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     });
     document.body.appendChild(dialog);
     dialog.showModal();
+    applyFinanceQaAvatar(dialog);
   }
 
   function formatReportCurrency(value) {

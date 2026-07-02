@@ -3901,8 +3901,8 @@ function renderBills(elements, data, ui, store) {
     </div>
     ${billLedgerModal(data.bills || [], month, data, ui.filters.billLedgerCategory || "")}
     <button class="finance-qa-float" data-finance-qa-float data-finance-qa="${escapeHtml(month)}" type="button" aria-label="打开财务问答助手" title="拖动调整位置，点击打开问答">
-      <span>AI</span>
-      <strong>财务问答</strong>
+      <span class="finance-qa-mascot" data-finance-qa-avatar><i></i></span>
+      <strong>财务小助手</strong>
     </button>
   `;
 }
