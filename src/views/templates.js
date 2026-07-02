@@ -28,7 +28,7 @@ export function contentCard(item, type, coverLabel) {
     .join("");
 
   return `
-    <article class="content-card" data-open="${type}:${item.id}" tabindex="0">
+    <article class="content-card" data-open="${escapeHtml(type)}:${escapeHtml(item.id)}" tabindex="0">
       <div class="cover">${escapeHtml(item.category || item.status || coverLabel || "内容")}</div>
       <div>
         <h3>${escapeHtml(item.title || item.name || "未命名")}</h3>
@@ -46,8 +46,8 @@ export function contentCard(item, type, coverLabel) {
 export function taskRow(task) {
   const statusClass = task.status === "已完成" ? "done" : task.status === "进行中" ? "progress" : "";
   return `
-    <article class="task-row" data-open="tasks:${task.id}">
-      <button class="task-check ${task.status === "已完成" ? "done" : ""}" data-complete="${escapeHtml(task.id)}" type="button" title="标记完成"></button>
+    <article class="task-row" data-open="tasks:${escapeHtml(task.id)}">
+      <button class="task-check ${task.status === "已完成" ? "done" : ""}" data-complete="${escapeHtml(task.id)}" type="button" title="标记完成" aria-label="标记完成"></button>
       <div>
         <strong>${escapeHtml(task.title)}</strong>
         <p>${escapeHtml(task.description || "暂无说明")}</p>
@@ -67,7 +67,7 @@ export function noteRow(note) {
     note.noteType === "idea" ? "灵感" : note.noteType === "link" ? "链接" : note.noteType === "summary" ? "回顾" : "笔记";
   const summary = note.description || excerptText(note.content || "", 88) || "暂无说明";
   return `
-    <article class="note-row" data-open="notes:${note.id}">
+    <article class="note-row" data-open="notes:${escapeHtml(note.id)}">
       <div class="meta-row">
         ${note.pinned ? '<span class="tag">置顶</span>' : ""}
         <span>${escapeHtml(note.category || "笔记")}</span>
@@ -86,7 +86,7 @@ export function billRow(bill) {
   const moneyClass = isIncome ? "income" : "expense";
   const fixedExpense = bill.fixedExpenseType || "";
   return `
-    <tr data-open="bills:${bill.id}">
+    <tr data-open="bills:${escapeHtml(bill.id)}">
       <td>${escapeHtml(bill.date || "")}</td>
       <td>${escapeHtml(bill.title)}</td>
       <td>${escapeHtml(bill.category || "未分类")}</td>
@@ -124,7 +124,7 @@ export function categoryBars(items) {
 
 export function searchResultCard(item) {
   return `
-    <article class="search-result-card" data-open="${item.entryType}:${item.id}">
+    <article class="search-result-card" data-open="${escapeHtml(item.entryType)}:${escapeHtml(item.id)}">
       <div class="meta-row">
         <span class="tag">${escapeHtml(typeLabels[item.entryType] || "内容")}</span>
         ${item.isFavorite ? '<span class="tag">重点</span>' : ""}
@@ -141,7 +141,7 @@ export function searchResultCard(item) {
 
 export function recentViewRow(item) {
   return `
-    <article class="recent-view-row" data-open="${item.type}:${item.id}">
+    <article class="recent-view-row" data-open="${escapeHtml(item.type)}:${escapeHtml(item.id)}">
       <div>
         <strong>${escapeHtml(item.title)}</strong>
         <p>${escapeHtml(typeLabels[item.type] || item.type)}</p>
@@ -209,7 +209,13 @@ export function favorEventRow(event, contactName) {
 
 export function pendingFavorCard(item) {
   const levelLabel =
-    item.level === "key" ? "重点提醒" : item.level === "attention" ? "建议尽快处理" : item.level === "balanced" ? "关系平衡" : "待安排";
+    item.level === "key"
+      ? "重点提醒"
+      : item.level === "attention"
+        ? "建议尽快处理"
+        : item.level === "balanced"
+          ? "关系平衡"
+          : "待安排";
   return `
     <article class="search-result-card">
       <div class="meta-row">
@@ -244,6 +250,8 @@ export function subscriptionCard(item) {
   const advice = item.advice || { label: "继续观察", reason: "等待更多使用记录", level: "normal" };
   const usageLabels = { high: "高频", occasional: "偶尔", rare: "少用", unknown: "未记录" };
   const necessityLabels = { essential: "必需", replaceable: "可替代", optional: "可取消", unknown: "未判断" };
+  const statusLabels = { active: "使用中", paused: "已暂停", cancelled: "已取消" };
+
   return `
     <article class="content-card subscription-card subscription-info-card subscription-card--${escapeHtml(item.level || "normal")}">
       <div class="subscription-info-card__top">
@@ -263,7 +271,7 @@ export function subscriptionCard(item) {
       <div class="subscription-info-card__chips">
         <span>${escapeHtml(cycleLabel)}</span>
         <span>${item.autoRenew ? "自动续费" : "手动续费"}</span>
-        <span>${escapeHtml(item.status || "active")}</span>
+        <span>${escapeHtml(statusLabels[item.status] || item.status || "使用中")}</span>
         ${item.websiteUrl ? `<span>网址 ${escapeHtml(item.websiteUrl)}</span>` : ""}
         ${item.accountName ? `<span>账号 ${escapeHtml(item.accountName)}</span>` : ""}
         ${item.accountPassword ? "<span>密码已保存</span>" : ""}
@@ -294,6 +302,7 @@ export function subscriptionCard(item) {
       <div class="subscription-info-card__actions">
         <button class="ghost-button" data-subscription-bill="${escapeHtml(item.id)}" type="button">生成账单</button>
         <button class="primary-button" data-subscription-renew="${escapeHtml(item.id)}" type="button">确认续费</button>
+        <button class="ghost-button" data-subscription-review="${escapeHtml(item.id)}" type="button">复盘</button>
         ${
           item.status === "paused"
             ? `<button class="ghost-button" data-subscription-status="${escapeHtml(item.id)}:active" type="button">恢复</button>`

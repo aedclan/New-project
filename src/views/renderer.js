@@ -438,6 +438,24 @@ function renderSelect(id, label, options, activeValue) {
   `;
 }
 
+function navIconSvg(icon) {
+  const paths = {
+    dashboard: '<rect x="4" y="4" width="7" height="7" rx="2"></rect><rect x="13" y="4" width="7" height="7" rx="2"></rect><rect x="4" y="13" width="7" height="7" rx="2"></rect><rect x="13" y="13" width="7" height="7" rx="2"></rect>',
+    tasks: '<path d="M8 7h11"></path><path d="M8 12h11"></path><path d="M8 17h11"></path><path d="m4 7 1 1 2-2"></path><path d="m4 12 1 1 2-2"></path><path d="m4 17 1 1 2-2"></path>',
+    wallet: '<path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6.5A2.5 2.5 0 0 1 4 16.5Z"></path><path d="M16 12h4"></path><path d="M7 5.2 16 3v2"></path>',
+    cycle: '<path d="M17 3v5h-5"></path><path d="M7 21v-5h5"></path><path d="M19 8a7 7 0 0 0-11.9-3.8L5 6"></path><path d="M5 16a7 7 0 0 0 11.9 3.8L19 18"></path>',
+    gift: '<path d="M20 12v8H4v-8"></path><path d="M2 8h20v4H2z"></path><path d="M12 8v12"></path><path d="M12 8H8.5A2.5 2.5 0 1 1 12 4.5Z"></path><path d="M12 8h3.5A2.5 2.5 0 1 0 12 4.5Z"></path>',
+    bookmark: '<path d="M6 4.5A2.5 2.5 0 0 1 8.5 2h7A2.5 2.5 0 0 1 18 4.5V21l-6-3.5L6 21Z"></path>',
+    settings: '<path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.05.05a2 2 0 1 1-2.83 2.83l-.05-.05A1.8 1.8 0 0 0 15 19.4a1.8 1.8 0 0 0-1 .6 1.8 1.8 0 0 0-.5 1.3V21a2 2 0 1 1-4 0v-.07A1.8 1.8 0 0 0 8 19.4a1.8 1.8 0 0 0-1.98.36l-.05.05a2 2 0 1 1-2.83-2.83l.05-.05A1.8 1.8 0 0 0 4.6 15a1.8 1.8 0 0 0-.6-1 1.8 1.8 0 0 0-1.3-.5H2.6a2 2 0 1 1 0-4h.1A1.8 1.8 0 0 0 4.6 8a1.8 1.8 0 0 0-.36-1.98l-.05-.05a2 2 0 1 1 2.83-2.83l.05.05A1.8 1.8 0 0 0 9 4.6a1.8 1.8 0 0 0 1-.6 1.8 1.8 0 0 0 .5-1.3V2.6a2 2 0 1 1 4 0v.1A1.8 1.8 0 0 0 15 4.6a1.8 1.8 0 0 0 1.98-.36l.05-.05a2 2 0 1 1 2.83 2.83l-.05.05A1.8 1.8 0 0 0 19.4 9c.2.36.5.68.9.86.4.18.83.22 1.2.14h.1a2 2 0 1 1 0 4h-.1a1.8 1.8 0 0 0-2.1 1Z"></path>',
+    search: '<circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path>',
+  };
+  return `
+    <svg class="nav-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      ${paths[icon] || paths.dashboard}
+    </svg>
+  `;
+}
+
 function renderNav(elements, ui) {
   const visibleItems = navItems.filter((item) => !item.hidden);
 
@@ -445,7 +463,7 @@ function renderNav(elements, ui) {
     .map(
       (item) => `
         <button class="nav-item ${ui.activePage === item.id ? "active" : ""}" data-page="${item.id}" type="button">
-          <span class="nav-icon">${item.icon}</span>
+          <span class="nav-icon">${navIconSvg(item.icon)}</span>
           <span>${item.label}</span>
         </button>
       `,
@@ -457,7 +475,7 @@ function renderNav(elements, ui) {
     .map(
       (item) => `
         <button class="${ui.activePage === item.id ? "active" : ""}" data-page="${item.id}" type="button">
-          <span>${item.icon}</span><br />${item.label}
+          <span class="mobile-tab-icon">${navIconSvg(item.icon)}</span><br />${item.label}
         </button>
       `,
     )
@@ -3895,6 +3913,71 @@ function financeEntryPanel(month) {
   `;
 }
 
+function billCommandHero(summary, commitments, risks) {
+  const riskCount = risks.filter((item) => item.level === "risk").length;
+  const watchCount = risks.filter((item) => item.level === "watch").length;
+  const futurePressure = commitments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const futureGap = Math.max(futurePressure - Math.max(summary.balance, 0), 0);
+  const budgetUsed = summary.totalBudget > 0 ? Math.round((summary.expense / summary.totalBudget) * 100) : 0;
+  const healthTone = summary.healthScore >= 82 ? "good" : summary.healthScore >= 64 ? "watch" : "risk";
+  const primaryRisk = risks.find((item) => item.level !== "good") || risks[0];
+  const nextAction =
+    summary.income <= 0
+      ? "先补录本月收入，避免风险判断失真。"
+      : summary.balance < 0
+        ? "现金流为负，优先暂停非必要支出并复核大额流水。"
+        : futureGap > 0
+          ? `未来计划仍有 ${formatCurrency(futureGap)} 缺口，先安排储备。`
+          : budgetUsed >= 80
+            ? "预算接近上限，新增消费先判断必要性。"
+            : "继续保持记录完整，月底保存月报。";
+  const statusLabel = healthTone === "good" ? "健康" : healthTone === "watch" ? "关注" : "风险";
+  return `
+    <section class="bill-command-hero bill-command-hero--${escapeHtml(healthTone)}" aria-label="生活收支指挥台">
+      <div class="bill-command-hero__intro">
+        <span class="eyebrow">Cashflow Command</span>
+        <h2>${escapeHtml(summary.month)} 生活收支</h2>
+        <p>用一屏看清本月现金流、预算节奏、风险来源和下一步动作。</p>
+      </div>
+      <article class="bill-command-health">
+        <span>综合状态</span>
+        <strong>${escapeHtml(statusLabel)} · ${escapeHtml(String(summary.healthScore || 0))}</strong>
+        <small>${primaryRisk ? escapeHtml(primaryRisk.title || primaryRisk.text || "继续观察") : "暂无明显风险"}</small>
+      </article>
+      <div class="bill-command-kpis">
+        <article>
+          <span>本月结余</span>
+          <strong class="${summary.balance >= 0 ? "is-positive" : "is-negative"}">${formatCurrency(summary.balance)}</strong>
+          <small>收入 ${formatCurrency(summary.income)} / 支出 ${formatCurrency(summary.expense)}</small>
+        </article>
+        <article>
+          <span>预算节奏</span>
+          <strong>${summary.totalBudget ? `${budgetUsed}%` : "未设置"}</strong>
+          <small>${summary.totalBudget ? `总预算 ${formatCurrency(summary.totalBudget)}` : "建议设置月度预算"}</small>
+        </article>
+        <article>
+          <span>风险队列</span>
+          <strong>${riskCount} 高 / ${watchCount} 关注</strong>
+          <small>${primaryRisk ? escapeHtml(primaryRisk.action || "查看风险提醒") : "保持观察"}</small>
+        </article>
+        <article>
+          <span>未来压力</span>
+          <strong>${formatCurrency(futurePressure)}</strong>
+          <small>${futureGap > 0 ? `缺口 ${formatCurrency(futureGap)}` : "当前可覆盖"}</small>
+        </article>
+      </div>
+      <div class="bill-command-action">
+        <span>下一步</span>
+        <strong>${escapeHtml(nextAction)}</strong>
+        <div>
+          <button class="primary-button" data-open-bill-ledger type="button">复核流水</button>
+          <button class="ghost-button" data-create-bill-review="${escapeHtml(summary.month)}" type="button">保存月报</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderBills(elements, data, ui, store) {
   renderControls(elements, data, ui, "bills");
   const fallbackMonth = getBillHistoryRows(data.bills || [])[0]?.month || data.budgets?.month || new Date().toISOString().slice(0, 7);
@@ -3914,6 +3997,7 @@ function renderBills(elements, data, ui, store) {
   elements.contentArea.innerHTML = `
     <div class="bill-dashboard-layout">
       <main class="bill-dashboard-layout__main">
+        ${billCommandHero(summary, commitments, risks)}
         ${billTimelinePanel(data.bills || [], month, timelineScope)}
         ${billTrendPanel(data, month, trendMode, trendRange, trendScope, trendZoomStart, trendZoomEnd, hiddenTrendSeries, trendCategories)}
         ${billDecisionStrip(summary, commitments)}
@@ -4194,11 +4278,116 @@ function subscriptionCompactRow(item) {
   `;
 }
 
+function renderSubscriptionControlHero(overview) {
+  const nextItem = overview.upcoming[0] || overview.reviewQueue[0] || overview.items[0];
+  const budget = overview.subscriptionBudget || {};
+  const monthlyBudget = Number(budget.monthlyBudget || budget.monthly || 0);
+  const budgetUsed = monthlyBudget ? Math.round((overview.estimatedMonthlyCost / Math.max(monthlyBudget, 1)) * 100) : 0;
+  const riskLevel = overview.expired.length ? "danger" : overview.urgent.length || budgetUsed >= 85 ? "warning" : "good";
+  const riskTitle =
+    riskLevel === "danger" ? "存在过期订阅" : riskLevel === "warning" ? "需要关注续费与预算" : "订阅状态健康";
+  const riskCopy =
+    riskLevel === "danger"
+      ? "先处理已过期项目，避免服务中断或补扣。"
+      : riskLevel === "warning"
+        ? "优先复盘临期、低频和高成本项目，防止预算被隐性订阅消耗。"
+        : "当前续费节奏清晰，可保持月度复盘。";
+
+  return `
+    <section class="subscription-control-hero subscription-control-hero--${riskLevel}" aria-label="订阅控制台概览">
+      <div class="subscription-control-hero__copy">
+        <span class="eyebrow">Subscription Control</span>
+        <h2>订阅控制台</h2>
+        <p>把订阅从“列表记录”升级为“成本、风险、归属、续费动作”一屏决策。</p>
+      </div>
+      <div class="subscription-control-hero__decision">
+        <span>当前判断</span>
+        <strong>${escapeHtml(riskTitle)}</strong>
+        <p>${escapeHtml(riskCopy)}</p>
+      </div>
+      <div class="subscription-control-hero__next">
+        <span>下一项动作</span>
+        <strong>${nextItem ? escapeHtml(nextItem.name) : "暂无订阅"}</strong>
+        <p>${nextItem ? escapeHtml(nextItem.reminderLabel || nextItem.nextRenewalDate || "等待复盘") : "录入订阅后生成续费提醒"}</p>
+      </div>
+    </section>
+  `;
+}
+
+function renderSubscriptionKpis(overview) {
+  const budget = overview.subscriptionBudget || {};
+  const monthlyBudget = Number(budget.monthlyBudget || budget.monthly || 0);
+  const budgetText = monthlyBudget
+    ? `${Math.round((overview.estimatedMonthlyCost / Math.max(monthlyBudget, 1)) * 100)}% 已占用`
+    : "未设置预算";
+  return `
+    <div class="subscription-control-kpis" aria-label="订阅关键指标">
+      ${statCard("月均成本", formatCurrency(overview.estimatedMonthlyCost), `年化 ${formatCurrency(overview.estimatedAnnualCost)}`)}
+      ${statCard("30天扣费", formatCurrency(overview.nextThirtyDaysTotal || 0), `${overview.upcoming.length} 项即将到期`)}
+      ${statCard("预算节奏", monthlyBudget ? `${formatCurrency(overview.estimatedMonthlyCost)} / ${formatCurrency(monthlyBudget)}` : formatCurrency(overview.estimatedMonthlyCost), budgetText)}
+      ${statCard("待复盘", overview.reviewQueue.length, `${overview.cancellable.length || 0} 项可优化`)}
+    </div>
+  `;
+}
+
+function renderSubscriptionRiskPanel(overview) {
+  const queue = [...overview.expired, ...overview.urgent, ...overview.reviewQueue, ...overview.highCost]
+    .filter((item, index, array) => array.findIndex((entry) => entry.id === item.id) === index)
+    .slice(0, 6);
+  return `
+    <section class="panel subscription-risk-panel">
+      <div class="panel-head">
+        <div>
+          <h2>风险与处理队列</h2>
+          <p class="panel-copy">先处理过期、临期、低频高成本和待复盘项目。</p>
+        </div>
+        <span class="results-count">${queue.length} 项</span>
+      </div>
+      <div class="subscription-list subscription-risk-list">
+        ${queue.map(subscriptionCompactRow).join("") || emptyState("当前没有需要优先处理的订阅")}
+      </div>
+    </section>
+  `;
+}
+
+function renderSubscriptionForecastPanel(overview) {
+  const rawTotals = overview.forecastMonthlyTotals || [];
+  const totals = Array.isArray(rawTotals)
+    ? rawTotals.map((item) => [item.month, item.amount]).slice(0, 6)
+    : Object.entries(rawTotals).slice(0, 6);
+  const max = Math.max(...totals.map(([, value]) => Number(value || 0)), 1);
+  return `
+    <section class="panel subscription-forecast-panel">
+      <div class="panel-head">
+        <div>
+          <h2>未来扣费节奏</h2>
+          <p class="panel-copy">按未来月份预估扣费，提前识别集中续费。</p>
+        </div>
+        <span class="results-count">预测 ${totals.length} 月</span>
+      </div>
+      <div class="subscription-forecast-bars">
+        ${
+          totals
+            .map(([month, value]) => {
+              const percent = Math.round((Number(value || 0) / max) * 100);
+              return `
+                <article class="subscription-forecast-bar">
+                  <span>${escapeHtml(month)}</span>
+                  <i><b style="width:${percent}%"></b></i>
+                  <strong>${formatCurrency(value)}</strong>
+                </article>
+              `;
+            })
+            .join("") || emptyState("暂无扣费节奏数据")
+        }
+      </div>
+    </section>
+  `;
+}
+
 function renderSubscriptions(elements, data, ui, store) {
   elements.filterRow.innerHTML = "";
   const overview = store.getSubscriptionsOverview();
-  const notificationSettings = loadSubscriptionNotificationSettings();
-  const reminderGroups = groupSubscriptionReminders(overview.items);
   const items = filterCollection(
     overview.items.map((item) => ({
       ...item,
@@ -4211,47 +4400,62 @@ function renderSubscriptions(elements, data, ui, store) {
   );
 
   elements.contentArea.innerHTML = `
-    <div class="stats-grid">
-      ${statCard("订阅数量", overview.total, "当前在跟进的订阅")}
-      ${statCard("月均成本", formatCurrency(overview.estimatedMonthlyCost), "折算后的月度压力")}
-      ${statCard("待复盘", overview.reviewQueue.length, "续费前需要判断的订阅")}
+    <div class="subscription-control-shell">
+      ${renderSubscriptionControlHero(overview)}
+      ${renderSubscriptionKpis(overview)}
+      <div class="subscription-control-layout">
+        <main class="subscription-control-main">
+          ${renderSubscriptionRiskPanel(overview)}
+          <div class="subscription-control-two">
+            ${renderSubscriptionDistributionPanel(overview)}
+            ${renderSubscriptionForecastPanel(overview)}
+          </div>
+          <section class="panel subscription-list-panel subscription-detail-card-panel">
+            <div class="panel-head">
+              <div>
+                <h2>订阅详情卡片</h2>
+                <p class="panel-copy">保留完整操作：记账、续费、复盘、暂停和取消。</p>
+              </div>
+              <span class="results-count">共 ${items.length} 项</span>
+            </div>
+            <div class="card-grid compact-card-grid subscription-detail-card-grid">
+              ${items.map(subscriptionCard).join("") || emptyState("还没有记录订阅项目")}
+            </div>
+          </section>
+          <section class="panel subscription-due-panel">
+            <div class="panel-head">
+              <div>
+                <h2>到期提醒</h2>
+                <p class="panel-copy">30 天内的扣费和续费动作。</p>
+              </div>
+              <span class="results-count">${overview.upcoming.length} 项</span>
+            </div>
+            <div class="subscription-due-list">
+              ${
+                overview.upcoming
+                  .map(
+                    (item) => `
+                      <article class="search-result-card subscription-alert subscription-alert--${escapeHtml(item.level || "normal")}">
+                        <div class="meta-row">
+                          <span class="tag ${item.level === "urgent" || item.level === "expired" ? "tag-danger" : ""}">${escapeHtml(item.reminderLabel)}</span>
+                          <span>${escapeHtml(item.nextRenewalDate || "未设置")}</span>
+                          ${item.autoRenew ? '<span class="tag">自动续费</span>' : '<span class="tag">手动续费</span>'}
+                        </div>
+                        <strong>${escapeHtml(item.name)}</strong>
+                        <p>${formatCurrency(item.amount)} / 月均 ${formatCurrency(item.monthlyCost)}</p>
+                      </article>
+                    `,
+                  )
+                  .join("") || emptyState("30 天内没有到期订阅")
+              }
+            </div>
+          </section>
+        </main>
+        <aside class="subscription-control-side" aria-label="订阅录入工作台">
+          ${renderSubscriptionForm()}
+        </aside>
+      </div>
     </div>
-    ${renderSubscriptionMaturityPanel(overview)}
-    ${renderSubscriptionForm()}
-    <section class="panel subscription-list-panel subscription-detail-card-panel">
-      <div class="panel-head">
-        <h2>订阅详情卡片</h2>
-        <span class="results-count">共 ${items.length} 项</span>
-      </div>
-      <div class="card-grid compact-card-grid subscription-detail-card-grid">
-        ${items.map(subscriptionCard).join("") || emptyState("还没有记录订阅项目")}
-      </div>
-    </section>
-    <section class="panel subscription-due-panel">
-      <div class="panel-head">
-        <h2>到期提醒</h2>
-        <span class="results-count">30 天内 ${overview.upcoming.length} 项</span>
-      </div>
-      <div class="subscription-due-list">
-        ${
-          overview.upcoming
-            .map(
-              (item) => `
-                <article class="search-result-card subscription-alert subscription-alert--${escapeHtml(item.level || "normal")}">
-                  <div class="meta-row">
-                    <span class="tag ${item.level === "urgent" || item.level === "expired" ? "tag-danger" : ""}">${escapeHtml(item.reminderLabel)}</span>
-                    <span>${escapeHtml(item.nextRenewalDate || "未设置")}</span>
-                    ${item.autoRenew ? '<span class="tag">自动续费</span>' : '<span class="tag">手动续费</span>'}
-                  </div>
-                  <strong>${escapeHtml(item.name)}</strong>
-                  <p>${formatCurrency(item.amount)} / 月均 ${formatCurrency(item.monthlyCost)}</p>
-                </article>
-              `,
-            )
-            .join("") || emptyState("30 天内没有到期订阅")
-        }
-      </div>
-    </section>
   `;
 }
 
