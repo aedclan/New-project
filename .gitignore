@@ -3,4 +3,7 @@ dist/
 .DS_Store
 *.log
 .env
+.data/
 personal-hub-data.json
+assets/login-covers/*
+!assets/login-covers/README.md

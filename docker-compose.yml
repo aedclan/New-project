@@ -9,6 +9,9 @@ services:
       PORT: 5173
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       SUBSCRIPTION_EMAIL_FROM: ${SUBSCRIPTION_EMAIL_FROM:-}
+      FINANCE_AI_API_KEY: ${FINANCE_AI_API_KEY:-}
+      FINANCE_AI_MODEL: ${FINANCE_AI_MODEL:-}
+      FINANCE_AI_API_URL: ${FINANCE_AI_API_URL:-https://api.openai.com/v1/chat/completions}
       PERSONAL_HUB_SYNC_TOKEN: ${PERSONAL_HUB_SYNC_TOKEN:-}
       PERSONAL_HUB_DATA_FILE: /app/data/personal-hub-data.json
       PERSONAL_HUB_BACKUP_DIR: /app/data/backups
@@ -34,6 +37,7 @@ services:
       - "127.0.0.1:5173:5173"
     volumes:
       - personal-hub-data:/app/data
+      - ./assets/login-covers:/app/assets/login-covers
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5173/healthz | grep -q '\"ok\":true'"]
       interval: 30s

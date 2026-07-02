@@ -6,3 +6,10 @@ dist
 .env
 test-fixtures
 wechat_banner_text_*.png
+.data
+dashboard-mint-overview-screenshot.png
+redesign-*.png
+subscription-layout-*.png
+theme-*.png
+green-cold-ui-palettes.png
+recovery-*.patch

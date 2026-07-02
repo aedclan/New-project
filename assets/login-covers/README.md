@@ -1,7 +1,16 @@
-把登录封面图片放在这个文件夹里，然后到“设置 -> 登录封面”填写路径：
+# 登录封面素材
 
-/assets/login-covers/cover-1.jpg
-/assets/login-covers/cover-2.gif
-/assets/login-covers/cover-3.webp
+这个目录用于保存登录封面图片、GIF/WebP 动图和视频。
 
-支持 jpg、png、gif、webp；多行填写会自动轮播。
+在设置页上传后，文件会自动保存到：
+
+```text
+/assets/login-covers/
+```
+
+支持格式：
+
+- 图片：jpg、jpeg、png、gif、webp
+- 视频：mp4、webm、mov
+
+VPS Docker 部署时，这个目录会挂载到容器内，保证后台上传的封面文件不会因为重新构建镜像而丢失。
