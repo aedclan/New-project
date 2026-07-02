@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { createReadStream, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
 import { getCurrentUser, handleAuthRequest } from "./auth-service.mjs";
+import { handleFinanceAiRequest } from "./finance-ai-service.mjs";
 import { handlePersistentDataRequest } from "./persistent-data-service.mjs";
 import { startScheduledBackups } from "./scheduled-backup-service.mjs";
 import { sendSubscriptionScanEmails, sendSubscriptionTestEmail } from "./subscription-email-service.mjs";
@@ -252,6 +253,10 @@ const server = createServer((request, response) => {
     .then((handled) => {
       if (handled) return true;
       return handlePersistentDataRequest(request, response);
+    })
+    .then((handled) => {
+      if (handled) return true;
+      return handleFinanceAiRequest(request, response);
     })
     .then((handled) => {
       if (!handled) serveStaticFile(request, response);

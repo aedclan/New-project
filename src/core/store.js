@@ -454,6 +454,160 @@ function buildFinanceForecastReport(data, targetMonth) {
   };
 }
 
+function stripReviewBullet(text) {
+  return String(text || "").replace(/^-\s*/, "").trim();
+}
+
+function scoreMonthlyRisk(value, ranges) {
+  return ranges.find((item) => value <= item.max)?.score ?? ranges[ranges.length - 1]?.score ?? 80;
+}
+
+function buildLocalMonthlyAiAnalysis({
+  targetMonth,
+  income,
+  expense,
+  balance,
+  topCategories,
+  riskLines,
+  qualityScore,
+  qualityConfidence,
+  forecastSummary,
+  futureGap,
+  budgetUsedRate,
+}) {
+  const forecast = forecastSummary || {};
+  const topCategory = topCategories?.[0];
+  const pressureScenario = (forecast.scenarios || []).find((item) => item.key === "pressure");
+  const riskScenario = (forecast.scenarios || []).find((item) => item.key === "risk");
+  const riskLine = Number(forecast.predictionRange?.riskLine || 0);
+  const topCategoryRate = expense > 0 && topCategory ? Number(topCategory.amount || 0) / expense : 0;
+  const forecastExpenseMid = Number(forecast.nextMonthExpense || 0);
+  const forecastExpenseHigh = Number(forecast.predictionRange?.expense?.high || forecastExpenseMid);
+  const futurePressure = Math.max(0, forecastExpenseHigh - forecastExpenseMid);
+  const tone =
+    qualityScore < 70 || Number(riskScenario?.balance || 0) < 0 || balance < 0
+      ? "risk"
+      : qualityScore < 86 || riskLines.length || Number(pressureScenario?.balance || 0) < riskLine
+        ? "watch"
+        : "good";
+  const conclusion = tone === "risk"
+    ? `${targetMonth} 存在现金流或数据质量压力，需要先处理高风险支出、缺失数据和未来资金缺口。`
+    : tone === "watch"
+      ? `${targetMonth} 整体仍可控制，但预算节奏、未来计划和主要支出流向需要继续跟踪。`
+      : `${targetMonth} 现金流和预算节奏相对稳定，可按当前计划继续执行并保持记录完整。`;
+  const risks = [
+    qualityScore < 86 ? `数据质量 ${qualityScore} 分，预测可信度为${qualityConfidence}，建议先补齐影响判断的流水字段。` : "",
+    riskLines[0] ? stripReviewBullet(riskLines[0]) : "",
+    topCategory ? `最大支出流向是「${topCategory.category}」，金额 ¥${Number(topCategory.amount || 0).toFixed(2)}，需要确认是否符合家庭优先级。` : "",
+    Number(forecast.nextMonthBalance || 0) < riskLine ? `下月预测结余 ¥${Number(forecast.nextMonthBalance || 0).toFixed(2)}，低于风险线 ¥${riskLine.toFixed(2)}。` : "",
+    futureGap > 0 ? `未来 3 个月已登记计划/续费仍有 ¥${Number(futureGap || 0).toFixed(2)} 缺口。` : "",
+  ].filter(Boolean).slice(0, 4);
+  const actions = [
+    qualityScore < 86 ? "优先补齐收入、分类、承担人和不计入分析原因，避免预测偏移。" : "",
+    topCategory ? `给「${topCategory.category}」设置本月控制线，并每周复核一次实际支出。` : "",
+    budgetUsedRate >= 80 ? "本月后续新增消费先判断必要性，避免预算继续超前消耗。" : "",
+    futureGap > 0 ? `为未来计划单独预留 ¥${Number(futureGap || 0).toFixed(2)}，不要混入日常可花预算。` : "",
+    Number(forecast.nextMonthBalance || 0) < 0 ? "下月先压缩可变支出或补充收入来源，避免现金流转负。" : "月底保存复盘并对比预测偏差，用于校准下一轮模型。",
+  ].filter(Boolean).slice(0, 5);
+  const evidence = [
+    `本月收入 ¥${Number(income || 0).toFixed(2)}，支出 ¥${Number(expense || 0).toFixed(2)}，结余 ¥${Number(balance || 0).toFixed(2)}。`,
+    `数据质量 ${qualityScore} 分，可信度 ${qualityConfidence}。`,
+    topCategory ? `最大支出分类「${topCategory.category}」金额 ¥${Number(topCategory.amount || 0).toFixed(2)}。` : "暂无稳定支出分类样本。",
+    pressureScenario ? `压力情景结余 ¥${Number(pressureScenario.balance || 0).toFixed(2)}，风险线 ¥${riskLine.toFixed(2)}。` : "暂无压力情景样本。",
+    riskScenario ? `风险情景结余 ¥${Number(riskScenario.balance || 0).toFixed(2)}。` : "暂无风险情景样本。",
+  ].filter(Boolean);
+  const riskRows = [
+    {
+      key: "cashflow",
+      label: "现金流",
+      score: scoreMonthlyRisk(income > 0 ? expense / income : expense > 0 ? 2 : 0, [
+        { max: 0.65, score: 8 },
+        { max: 0.82, score: 18 },
+        { max: 0.95, score: 34 },
+        { max: 99, score: 52 },
+      ]),
+      text: income > 0 ? `支出率 ${Math.round((expense / income) * 100)}%，本月结余 ¥${Number(balance || 0).toFixed(2)}。` : "缺少收入参照，现金流判断偏保守。",
+    },
+    {
+      key: "quality",
+      label: "数据质量",
+      score: Math.max(0, 100 - Number(qualityScore || 70)),
+      text: `质量分 ${qualityScore}，可信度 ${qualityConfidence}。`,
+    },
+    {
+      key: "forecast",
+      label: "预测压力",
+      score: scoreMonthlyRisk(riskLine > 0 ? Number(pressureScenario?.balance || 0) / riskLine : Number(pressureScenario?.balance || 0) >= 0 ? 0 : 2, [
+        { max: 0, score: 48 },
+        { max: 0.8, score: 36 },
+        { max: 1.2, score: 24 },
+        { max: 99, score: 10 },
+      ]),
+      text: `压力情景结余 ¥${Number(pressureScenario?.balance || 0).toFixed(2)}，风险情景结余 ¥${Number(riskScenario?.balance || 0).toFixed(2)}。`,
+    },
+    {
+      key: "concentration",
+      label: "支出集中",
+      score: scoreMonthlyRisk(topCategoryRate, [
+        { max: 0.28, score: 8 },
+        { max: 0.45, score: 18 },
+        { max: 0.6, score: 30 },
+        { max: 99, score: 42 },
+      ]),
+      text: topCategory ? `最大分类「${topCategory.category}」占支出 ${Math.round(topCategoryRate * 100)}%。` : "暂无分类样本。",
+    },
+    {
+      key: "buffer",
+      label: "波动缓冲",
+      score: scoreMonthlyRisk(income > 0 ? futurePressure / income : futurePressure > 0 ? 1 : 0, [
+        { max: 0.08, score: 8 },
+        { max: 0.18, score: 18 },
+        { max: 0.32, score: 32 },
+        { max: 99, score: 44 },
+      ]),
+      text: `下月支出高位较中位多 ¥${futurePressure.toFixed(2)}。`,
+    },
+  ];
+  const riskBreakdown = {
+    total: Math.min(100, Math.round(riskRows.reduce((sum, item) => sum + item.score, 0) / riskRows.length * 1.6)),
+    level: "",
+    rows: riskRows,
+  };
+  riskBreakdown.level = riskBreakdown.total >= 65 ? "高风险" : riskBreakdown.total >= 38 ? "需关注" : "可控";
+  const priorityActionMap = {
+    cashflow: "先设定本月剩余可花额度，新增非必要支出延后到下周复核。",
+    quality: "优先补齐收入、分类、承担人和排除原因，避免后续预测偏移。",
+    forecast: "按压力情景预留缓冲资金，不按正常情景把预算花满。",
+    concentration: topCategory ? `给「${topCategory.category}」设置单独控制线，超过后只保留必要支出。` : "先补齐支出分类，再判断是否存在集中消费。",
+    buffer: "为下月支出高位单独留出缓冲，避免未来计划挤占生活预算。",
+  };
+  const priorityActions = [...riskRows]
+    .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))
+    .slice(0, 3)
+    .map((item, index) => ({
+      rank: index + 1,
+      key: item.key,
+      label: item.label,
+      score: item.score,
+      reason: item.text,
+      action: priorityActionMap[item.key] || "保持记录完整，月底复盘偏差并校准预算。",
+    }));
+
+  return {
+    mode: "local-rule",
+    privacyMode: "local-only",
+    tone,
+    title: "智能分析摘要",
+    conclusion,
+    riskBreakdown,
+    priorityActions,
+    evidence,
+    risks,
+    actions,
+    narrative: [conclusion, risks.join("；"), actions.join("；")].filter(Boolean).join("\n"),
+  };
+}
+
 function scoreByRate(rate, ranges) {
   const currentRate = Number(rate || 0);
   return ranges.find((item) => currentRate <= item.max)?.score ?? ranges[ranges.length - 1]?.score ?? 60;
@@ -519,16 +673,17 @@ function buildMonthlyFinanceActions({ income, expense, expenseItems, health }) {
   ].filter(Boolean);
 }
 
-function formatBillActionStatusForReview(statusMap = {}, statusMetaMap = {}) {
+function formatBillActionStatusForReview(statusMap = {}, statusMetaMap = {}, titleMap = {}) {
   const entries = Object.entries(statusMap)
     .map(([id, status]) => {
       const meta = statusMetaMap[id] || {};
       return {
-        title: String(id || "")
-        .replace(/^carry-\d{4}-\d{2}-/, "")
-        .replace(/-/g, " ")
-        .replace(/\s+/g, " ")
-        .trim() || "未命名行动",
+        title: titleMap[id] || String(id || "")
+          .replace(/^carry-\d{4}-\d{2}-/, "")
+          .replace(/^ai-action-\d{4}-\d{2}-/, "")
+          .replace(/-/g, " ")
+          .replace(/\s+/g, " ")
+          .trim() || "未命名行动",
         status: ["待处理", "进行中", "已完成"].includes(status) ? status : "待处理",
         updatedAt: String(meta.completedAt || meta.updatedAt || "").slice(0, 10),
       };
@@ -554,6 +709,35 @@ function formatBillActionStatusForReview(statusMap = {}, statusMetaMap = {}) {
   return {
     summary: `- 行动状态：${doneCount}/${entries.length} 已完成，${doingCount} 项进行中，${todoCount} 项待处理。`,
     detail,
+  };
+}
+
+function formatBillAiActionDecisionReport(month, decisions = {}, statusMap = {}) {
+  const entries = Object.values(decisions || {});
+  if (!entries.length) {
+    return {
+      summary: "- AI 行动：本月暂无已处理的 AI 行动建议。",
+      detail: "- 暂无采纳、修改或忽略记录。",
+      adopted: 0,
+      ignored: 0,
+    };
+  }
+  const adoptedRows = entries.filter((item) => item.decision === "adopted");
+  const ignoredRows = entries.filter((item) => item.decision === "ignored");
+  const detail = [
+    adoptedRows.length ? "### 已采纳" : "",
+    adoptedRows.map((item) => {
+      const status = statusMap[item.id] || "待处理";
+      return `- [${status}] ${item.title || item.action || "AI 行动"}：${item.text || item.reason || "按建议执行。"}${item.updatedAt ? `（${item.updatedAt}）` : ""}`;
+    }).join("\n"),
+    ignoredRows.length ? "### 已忽略" : "",
+    ignoredRows.map((item) => `- ${item.title || item.action || "AI 行动"}：${item.reason || "用户选择暂不处理。"}${item.updatedAt ? `（${item.updatedAt}）` : ""}`).join("\n"),
+  ].filter(Boolean).join("\n");
+  return {
+    summary: `- AI 行动：${adoptedRows.length} 条已采纳，${ignoredRows.length} 条已忽略。`,
+    detail: detail || "- 暂无采纳、修改或忽略记录。",
+    adopted: adoptedRows.length,
+    ignored: ignoredRows.length,
   };
 }
 
@@ -595,6 +779,7 @@ function normalizeLegacyData(data) {
     ...(data.budgets || {}),
     billActionStatuses: (data.budgets || {}).billActionStatuses || {},
     billActionStatusMeta: (data.budgets || {}).billActionStatusMeta || {},
+    billAiActionDecisions: (data.budgets || {}).billAiActionDecisions || {},
   };
   data.bills = data.bills || [];
 
@@ -1192,6 +1377,7 @@ export function createStore() {
           categoryBudgets: [],
           billActionStatuses: {},
           billActionStatusMeta: {},
+          billAiActionDecisions: {},
           subscriptionMonthlyBudget: 0,
           subscriptionAnnualBudget: 0,
           subscriptionCategoryBudgets: [],
@@ -1490,9 +1676,20 @@ export function createStore() {
         return `- ${row.category}：¥${Number(row.amount || 0).toFixed(2)}，${row.count} 笔，占支出 ${percent}%${sample}`;
       }).join("\n") || "- 暂无分类支出";
       const actionLine = buildMonthlyFinanceActions({ income, expense, expenseItems, health }).join("\n") || "- 暂无必须处理的问题，继续观察趋势。";
+      const aiActionDecisions = (budgets.billAiActionDecisions || {})[targetMonth] || {};
+      const aiActionTitleMap = Object.values(aiActionDecisions).reduce((map, item) => {
+        if (item?.id && item?.title) map[item.id] = item.title;
+        return map;
+      }, {});
       const actionStatus = formatBillActionStatusForReview(
         (budgets.billActionStatuses || {})[targetMonth] || {},
         (budgets.billActionStatusMeta || {})[targetMonth] || {},
+        aiActionTitleMap,
+      );
+      const aiActionReview = formatBillAiActionDecisionReport(
+        targetMonth,
+        aiActionDecisions,
+        (budgets.billActionStatuses || {})[targetMonth] || {},
       );
       const componentLine = health.components.map((item) => `- ${item.label}：${item.score} 分，权重 ${item.weight}%，${item.hint}`).join("\n");
       const weakLine = health.weakItems.map((item) => `- ${item.label}：${item.score} 分，${item.hint}`).join("\n") || "- 暂无明显短板";
@@ -1543,6 +1740,44 @@ export function createStore() {
               : health.score < 70
                 ? "本月财务健康分偏低，建议优先处理薄弱项。"
                 : "本月现金流为正，预算和未来计划整体可控。";
+      const aiAnalysis = buildLocalMonthlyAiAnalysis({
+        targetMonth,
+        income,
+        expense,
+        balance,
+        topCategories,
+        riskLines,
+        qualityScore,
+        qualityConfidence,
+        forecastSummary: forecastReport.summary,
+        futureGap,
+        budgetUsedRate,
+      });
+      const aiAnalysisLine = [
+        `- 分析模式：${aiAnalysis.mode === "local-rule" ? "本地规则智能分析" : "AI 智能分析"}`,
+        `- 隐私口径：${aiAnalysis.privacyMode === "local-only" ? "仅使用本地聚合数据，不上传原始流水。" : "使用外部 AI 分析聚合摘要。"}`,
+        `- 分析依据：收入、支出、结余、数据质量、预测区间、压力情景、最大支出分类和未来计划缺口。`,
+        `- 结论：${aiAnalysis.conclusion}`,
+        `- 综合风险：${aiAnalysis.riskBreakdown.level}（${aiAnalysis.riskBreakdown.total} / 100）`,
+        "",
+        "### 风险评分拆解",
+        aiAnalysis.riskBreakdown.rows.map((item) => `- ${item.label}：${item.score} 分。${item.text}`).join("\n"),
+        "",
+        "### 优先处理项",
+        aiAnalysis.priorityActions.map((item) => `- P${item.rank} ${item.label}：${item.action}（依据：${item.reason}）`).join("\n"),
+        "",
+        "### 采纳状态",
+        aiActionReview.summary,
+        "",
+        "### 判断依据",
+        aiAnalysis.evidence.map((item) => `- ${item}`).join("\n") || "- 暂无可用依据。",
+        "",
+        "### 风险解释",
+        aiAnalysis.risks.map((item) => `- ${item}`).join("\n") || "- 暂未发现需要优先处理的风险。",
+        "",
+        "### 建议动作",
+        aiAnalysis.actions.map((item) => `- ${item}`).join("\n") || "- 保持记录完整，月底继续复盘。",
+      ].join("\n");
       const title = `${targetMonth} 生活收支月报`;
       const legacyTitle = `${targetMonth} 生活收支复盘`;
       const content = [
@@ -1557,6 +1792,9 @@ export function createStore() {
         `- 未来 3 个月计划/续费：¥${futureTotal.toFixed(2)}，资金缺口：¥${futureGap.toFixed(2)}`,
         `- 不计入分析流水：${excludedBills.length} 笔，¥${excludedBills.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2)}`,
         `- 健康评分：${health.score} 分`,
+        "",
+        "## 智能分析摘要",
+        aiAnalysisLine,
         "",
         "## 风险提醒",
         riskText,
@@ -1595,6 +1833,10 @@ export function createStore() {
         actionStatus.summary,
         actionStatus.detail,
         "",
+        "## AI 行动采纳复盘",
+        aiActionReview.summary,
+        aiActionReview.detail,
+        "",
         "## 大额支出",
         abnormalLine,
         "",
@@ -1604,6 +1846,8 @@ export function createStore() {
       const actionStatusMap = (budgets.billActionStatuses || {})[targetMonth] || {};
       const actionTotal = Object.keys(actionStatusMap).length;
       const actionDone = Object.values(actionStatusMap).filter((status) => status === "已完成").length;
+      const aiActionTotal = aiActionReview.adopted;
+      const aiActionIgnored = aiActionReview.ignored;
       const billReportSummary = {
         month: targetMonth,
         income,
@@ -1616,12 +1860,15 @@ export function createStore() {
         topCategoryAmount: Number(topCategories[0]?.amount || 0),
         actionDone,
         actionTotal,
+        aiActionTotal,
+        aiActionIgnored,
         futureGap,
         qualityStatus,
         qualityScore,
         qualityConfidence,
         qualityIssues,
         forecast: forecastReport.summary,
+        aiAnalysis,
         updatedAt: today,
       };
       const existing = (data.notes || []).find((item) => item.noteType === "summary" && (item.title === title || item.title === legacyTitle || item.billReportMonth === targetMonth));
@@ -1733,6 +1980,51 @@ export function createStore() {
         ...(data.budgets || {}),
         billActionStatuses: statuses,
         billActionStatusMeta: statusMeta,
+      };
+      save();
+      return true;
+    },
+    saveBillAiActionDecision(month, actionPayload = {}, decision = "adopted") {
+      const monthKey = String(month || "").trim();
+      const key = String(actionPayload.key || actionPayload.id || "").trim();
+      const normalizedDecision = ["adopted", "ignored"].includes(decision) ? decision : "adopted";
+      if (!monthKey || !key) return false;
+      const today = new Date().toISOString().slice(0, 10);
+      const id = `ai-action-${monthKey}-${key}`.replace(/[^\w\u4e00-\u9fa5-]+/g, "-");
+      const currentMonthDecisions = (((data.budgets || {}).billAiActionDecisions || {})[monthKey] || {});
+      const nextMonthDecisions = {
+        ...currentMonthDecisions,
+        [key]: {
+          ...currentMonthDecisions[key],
+          id,
+          key,
+          decision: normalizedDecision,
+          label: String(actionPayload.label || "AI").trim() || "AI",
+          title: String(actionPayload.title || actionPayload.action || "AI 行动").trim() || "AI 行动",
+          text: String(actionPayload.text || actionPayload.action || "").trim(),
+          metric: String(actionPayload.metric || "").trim(),
+          score: Number(actionPayload.score || 0),
+          reason: String(actionPayload.reason || "").trim(),
+          updatedAt: today,
+        },
+      };
+      const allStatuses = { ...((data.budgets || {}).billActionStatuses || {}) };
+      const monthStatuses = { ...(allStatuses[monthKey] || {}) };
+      if (normalizedDecision === "adopted" && !monthStatuses[id]) {
+        monthStatuses[id] = "待处理";
+      }
+      if (normalizedDecision === "ignored") {
+        delete monthStatuses[id];
+      }
+      allStatuses[monthKey] = monthStatuses;
+
+      data.budgets = {
+        ...(data.budgets || {}),
+        billAiActionDecisions: {
+          ...((data.budgets || {}).billAiActionDecisions || {}),
+          [monthKey]: nextMonthDecisions,
+        },
+        billActionStatuses: allStatuses,
       };
       save();
       return true;

@@ -1625,6 +1625,9 @@ function buildMonthlyActionItems(data, summary, risks, commitments) {
   const forecast = buildFinanceForecast(data, summary.month);
   const excludedForecastSamples = getForecastExcludedSampleSummary(data);
   const dataQuality = buildFinanceDataQuality(data, summary.month);
+  const smartPriorityActions = getAdoptedAiActionItems(data, summary.month);
+
+  smartPriorityActions.forEach((item) => pushAction(item));
 
   if (summary.income <= 0 && summary.expense > 0) {
     pushAction({
@@ -1787,6 +1790,21 @@ function buildMonthlyActionItems(data, summary, risks, commitments) {
     });
 
   return actions.slice(0, 5);
+}
+
+function getAdoptedAiActionItems(data, month) {
+  const decisions = ((data.budgets || {}).billAiActionDecisions || {})[month] || {};
+  return Object.values(decisions)
+    .filter((item) => item.decision === "adopted")
+    .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))
+    .map((item, index) => ({
+      id: item.id || `ai-action-${month}-${item.key}`,
+      tone: Number(item.score || 0) >= 38 ? "risk" : "watch",
+      label: item.label || "AI",
+      title: item.title || "AI 行动",
+      text: item.text || item.reason || "按智能分析建议推进。",
+      metric: item.metric || `AI · ${index + 1}`,
+    }));
 }
 
 function billDecisionStrip(summary, commitments) {
@@ -2250,7 +2268,10 @@ function billForecastPanel(data, activeMonth) {
           <span class="eyebrow">FORECAST</span>
           <h2>长期预测与风险预告</h2>
         </div>
-        <span class="results-count">可信度 ${escapeHtml(forecast.confidence)} · 数据 ${escapeHtml(String(dataQuality.score))} 分</span>
+        <div class="bill-forecast-head-actions">
+          <span class="results-count">可信度 ${escapeHtml(forecast.confidence)} · 数据 ${escapeHtml(String(dataQuality.score))} 分</span>
+          <button class="ghost-button" data-finance-ai-analysis="${escapeHtml(activeMonth)}" type="button">智能分析</button>
+        </div>
       </div>
       <div class="bill-forecast-hero">
         <div>
@@ -3879,6 +3900,10 @@ function renderBills(elements, data, ui, store) {
       </aside>
     </div>
     ${billLedgerModal(data.bills || [], month, data, ui.filters.billLedgerCategory || "")}
+    <button class="finance-qa-float" data-finance-qa-float data-finance-qa="${escapeHtml(month)}" type="button" aria-label="打开财务问答助手" title="拖动调整位置，点击打开问答">
+      <span>AI</span>
+      <strong>财务问答</strong>
+    </button>
   `;
 }
 

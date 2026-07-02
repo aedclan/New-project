@@ -25,7 +25,10 @@ import {
   verifyServerUserEmail,
 } from "./server-auth.js";
 import { applyAuthCoverImage, resetAuthCoverImage, saveAuthCoverImage } from "./auth-cover.js";
+import { buildFinanceAiSummary, requestFinanceAiAnalysis, requestFinanceQuestion } from "./finance-ai.js";
 import { renderMarkdown } from "./utils.js";
+
+const FINANCE_QA_FLOAT_POSITION_KEY = "personal-hub-finance-qa-float-position";
 
 function createDefaultFilters() {
   return {
@@ -270,6 +273,112 @@ export function bindEvents(app, elements, renderer, formController, authControll
     formController.close();
     reopenBillLedgerPanel();
   }
+
+  function getFinanceQaFloatPosition() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(FINANCE_QA_FLOAT_POSITION_KEY) || "null");
+      if (!saved || typeof saved !== "object") return null;
+      const x = Number(saved.x);
+      const y = Number(saved.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return { x, y };
+    } catch {
+      return null;
+    }
+  }
+
+  function saveFinanceQaFloatPosition(position) {
+    localStorage.setItem(FINANCE_QA_FLOAT_POSITION_KEY, JSON.stringify(position));
+  }
+
+  function clampFinanceQaFloatPosition(button, position) {
+    const margin = 12;
+    const width = button.offsetWidth || 120;
+    const height = button.offsetHeight || 56;
+    const maxX = Math.max(margin, window.innerWidth - width - margin);
+    const maxY = Math.max(margin, window.innerHeight - height - margin);
+    return {
+      x: Math.min(Math.max(position.x, margin), maxX),
+      y: Math.min(Math.max(position.y, margin), maxY),
+    };
+  }
+
+  function applyFinanceQaFloatPosition() {
+    const button = document.querySelector("[data-finance-qa-float]");
+    if (!button) return;
+    const saved = getFinanceQaFloatPosition();
+    if (!saved) return;
+    const position = clampFinanceQaFloatPosition(button, saved);
+    button.style.left = `${position.x}px`;
+    button.style.top = `${position.y}px`;
+    button.style.right = "auto";
+    button.style.bottom = "auto";
+  }
+
+  function bindFinanceQaFloatDrag() {
+    let dragState = null;
+
+    document.addEventListener("pointerdown", (event) => {
+      const button = event.target.closest("[data-finance-qa-float]");
+      if (!button || event.button !== 0) return;
+      const rect = button.getBoundingClientRect();
+      dragState = {
+        button,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: rect.left,
+        originY: rect.top,
+        moved: false,
+      };
+      button.setPointerCapture?.(event.pointerId);
+      button.classList.add("is-dragging");
+    });
+
+    document.addEventListener("pointermove", (event) => {
+      if (!dragState || event.pointerId !== dragState.pointerId) return;
+      const dx = event.clientX - dragState.startX;
+      const dy = event.clientY - dragState.startY;
+      if (Math.hypot(dx, dy) > 5) dragState.moved = true;
+      const position = clampFinanceQaFloatPosition(dragState.button, {
+        x: dragState.originX + dx,
+        y: dragState.originY + dy,
+      });
+      dragState.button.style.left = `${position.x}px`;
+      dragState.button.style.top = `${position.y}px`;
+      dragState.button.style.right = "auto";
+      dragState.button.style.bottom = "auto";
+      if (dragState.moved) {
+        dragState.button.dataset.financeQaDragged = "true";
+        event.preventDefault();
+      }
+    });
+
+    function finishDrag(event) {
+      if (!dragState || event.pointerId !== dragState.pointerId) return;
+      const { button, moved } = dragState;
+      button.releasePointerCapture?.(event.pointerId);
+      button.classList.remove("is-dragging");
+      if (moved) {
+        const rect = button.getBoundingClientRect();
+        const position = clampFinanceQaFloatPosition(button, { x: rect.left, y: rect.top });
+        saveFinanceQaFloatPosition(position);
+        button.dataset.financeQaDragged = "true";
+      }
+      dragState = null;
+    }
+
+    document.addEventListener("pointerup", finishDrag);
+    document.addEventListener("pointercancel", finishDrag);
+    window.addEventListener("resize", applyFinanceQaFloatPosition);
+  }
+
+  const renderWithFinanceQaFloat = renderer.render.bind(renderer);
+  renderer.render = () => {
+    renderWithFinanceQaFloat();
+    requestAnimationFrame(applyFinanceQaFloatPosition);
+  };
+  bindFinanceQaFloatDrag();
 
   const billTrendScopes = ["year", "month", "week", "day"];
 
@@ -694,6 +803,284 @@ export function bindEvents(app, elements, renderer, formController, authControll
     dialog.showModal();
   }
 
+  async function showFinanceAiAnalysisDialog(month) {
+    const dialog = document.createElement("dialog");
+    dialog.className = "modal finance-ai-analysis-modal";
+    dialog.innerHTML = `
+      <section class="modal-panel finance-ai-analysis-panel">
+        <div class="drawer-head">
+          <div>
+            <span class="eyebrow">AI ANALYSIS</span>
+            <h2>${escapeHtml(month)} 智能分析</h2>
+          </div>
+          <button class="icon-button" data-close-finance-ai-analysis type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="finance-ai-analysis-body">
+          <article class="finance-ai-loading">正在分析聚合后的财务数据...</article>
+        </div>
+      </section>
+    `;
+    const close = () => {
+      dialog.close();
+      dialog.remove();
+    };
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog || event.target.closest("[data-close-finance-ai-analysis]")) close();
+    });
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      close();
+    });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+
+    const body = dialog.querySelector(".finance-ai-analysis-body");
+    try {
+      const summary = buildFinanceAiSummary(app.store.getData(), month);
+      const result = await requestFinanceAiAnalysis(summary);
+      const modeLabel = result.mode === "local-rule" ? "本地智能分析" : "AI 智能分析";
+      const privacyLabel = result.privacyMode === "local-only" ? "本地聚合计算" : "聚合摘要分析";
+      const aiActionDecisions = ((app.store.getData().budgets || {}).billAiActionDecisions || {})[summary.month] || {};
+      body.innerHTML = `
+        <article class="finance-ai-hero finance-ai-hero--${escapeHtml(result.tone || "good")}">
+          <span>${escapeHtml(modeLabel)}</span>
+          <strong>${escapeHtml(result.title || "智能分析")}</strong>
+          <p>${escapeHtml(result.conclusion || "暂无分析结论。")}</p>
+        </article>
+        <div class="finance-ai-source-grid">
+          <article><span>隐私口径</span><strong>${escapeHtml(privacyLabel)}</strong><small>${escapeHtml(result.privacyMode === "local-only" ? "不上传原始流水，不调用第三方模型" : "仅发送聚合摘要")}</small></article>
+          <article><span>数据范围</span><strong>${escapeHtml(summary.month)}</strong><small>收入、支出、预算、分类、预测区间</small></article>
+          <article><span>可信度</span><strong>${escapeHtml(summary.dataQuality?.confidence || "-")}</strong><small>数据质量 ${escapeHtml(String(summary.dataQuality?.score ?? "-"))} 分</small></article>
+        </div>
+        ${
+          result.riskBreakdown
+            ? `<section class="finance-ai-risk-score finance-ai-risk-score--${escapeHtml(result.tone || "good")}">
+                <div>
+                  <span>综合风险</span>
+                  <strong>${escapeHtml(result.riskBreakdown.level || "-")}</strong>
+                  <small>${escapeHtml(String(result.riskBreakdown.total ?? "-"))} / 100</small>
+                </div>
+                <div class="finance-ai-risk-score__rows">
+                  ${(result.riskBreakdown.rows || []).map((item) => `
+                    <article>
+                      <span>${escapeHtml(item.label || "-")}</span>
+                      <strong>${escapeHtml(String(item.score ?? 0))}</strong>
+                      <p>${escapeHtml(item.text || "")}</p>
+                    </article>
+                  `).join("")}
+                </div>
+              </section>`
+            : ""
+        }
+        ${
+          result.priorityActions?.length
+            ? `<section class="finance-ai-priority-actions">
+                <h3>优先处理</h3>
+                <div>
+                  ${result.priorityActions.map((item) => `
+                    <article class="finance-ai-priority-action-card finance-ai-priority-action-card--${escapeHtml(aiActionDecisions[item.key]?.decision || "new")}">
+                      <span>P${escapeHtml(String(item.rank || ""))} · ${escapeHtml(item.label || "-")}${aiActionDecisions[item.key]?.decision === "adopted" ? " · 已采纳" : aiActionDecisions[item.key]?.decision === "ignored" ? " · 已忽略" : ""}</span>
+                      <strong>${escapeHtml(item.action || "")}</strong>
+                      <p>${escapeHtml(item.reason || "")}</p>
+                      <div class="finance-ai-priority-action-card__actions">
+                        <button
+                          class="ghost-button"
+                          data-finance-ai-action-decision="adopted"
+                          data-ai-action-month="${escapeHtml(summary.month)}"
+                          data-ai-action-key="${escapeHtml(item.key || "")}"
+                          data-ai-action-label="${escapeHtml(item.label || "AI")}"
+                          data-ai-action-title="${escapeHtml(item.title || `${item.label || "AI"}行动`)}"
+                          data-ai-action-text="${escapeHtml(item.action || "")}"
+                          data-ai-action-metric="${escapeHtml(`P${item.rank || ""} · ${item.score || 0}分`)}"
+                          data-ai-action-score="${escapeHtml(String(item.score || 0))}"
+                          data-ai-action-reason="${escapeHtml(item.reason || "")}"
+                          type="button"
+                        >采纳</button>
+                        <button
+                          class="ghost-button"
+                          data-finance-ai-action-decision="modify"
+                          data-ai-action-month="${escapeHtml(summary.month)}"
+                          data-ai-action-key="${escapeHtml(item.key || "")}"
+                          data-ai-action-label="${escapeHtml(item.label || "AI")}"
+                          data-ai-action-title="${escapeHtml(item.title || `${item.label || "AI"}行动`)}"
+                          data-ai-action-text="${escapeHtml(item.action || "")}"
+                          data-ai-action-metric="${escapeHtml(`P${item.rank || ""} · ${item.score || 0}分`)}"
+                          data-ai-action-score="${escapeHtml(String(item.score || 0))}"
+                          data-ai-action-reason="${escapeHtml(item.reason || "")}"
+                          type="button"
+                        >修改采纳</button>
+                        <button
+                          class="ghost-button"
+                          data-finance-ai-action-decision="ignored"
+                          data-ai-action-month="${escapeHtml(summary.month)}"
+                          data-ai-action-key="${escapeHtml(item.key || "")}"
+                          data-ai-action-label="${escapeHtml(item.label || "AI")}"
+                          data-ai-action-title="${escapeHtml(item.title || `${item.label || "AI"}行动`)}"
+                          data-ai-action-text="${escapeHtml(item.action || "")}"
+                          data-ai-action-metric="${escapeHtml(`P${item.rank || ""} · ${item.score || 0}分`)}"
+                          data-ai-action-score="${escapeHtml(String(item.score || 0))}"
+                          data-ai-action-reason="${escapeHtml(item.reason || "")}"
+                          type="button"
+                        >忽略</button>
+                      </div>
+                    </article>
+                  `).join("")}
+                </div>
+              </section>`
+            : ""
+        }
+        <section class="finance-ai-evidence">
+          <h3>判断依据</h3>
+          <div>
+            ${(result.evidence || []).map((item) => `<p>${escapeHtml(item)}</p>`).join("") || "<p>暂无可核对依据。</p>"}
+          </div>
+        </section>
+        <div class="finance-ai-grid">
+          <section>
+            <h3>风险解释</h3>
+            ${(result.risks || []).map((item) => `<p>${escapeHtml(item)}</p>`).join("") || "<p>暂无明显风险。</p>"}
+          </section>
+          <section>
+            <h3>建议动作</h3>
+            ${(result.actions || []).map((item) => `<p>${escapeHtml(item)}</p>`).join("") || "<p>继续保持记录完整。</p>"}
+          </section>
+        </div>
+        <section class="finance-ai-note">
+          <h3>分析口径</h3>
+          <p>当前只在本地使用月度聚合数据、分类汇总、预测区间和情景结果进行判断，不上传原始流水明细。后续如需接入大模型 API，需要单独确认授权。</p>
+        </section>
+      `;
+    } catch (error) {
+      body.innerHTML = `<article class="finance-ai-loading is-error">${escapeHtml(error.message || "智能分析失败。")}</article>`;
+    }
+  }
+
+  function renderFinanceQaResult(result, month) {
+    return `
+      <article class="finance-qa-answer">
+        <span>意图：${escapeHtml(result.intent || "general")}</span>
+        <strong>${escapeHtml(result.answer || "暂无回答。")}</strong>
+      </article>
+      <div class="finance-qa-detail-grid">
+        <section>
+          <h3>数据依据</h3>
+          ${(result.evidence || []).map((item) => `<p>${escapeHtml(item)}</p>`).join("") || "<p>暂无依据。</p>"}
+        </section>
+        <section>
+          <h3>计算过程</h3>
+          ${(result.calculations || []).map((item) => `<p>${escapeHtml(item)}</p>`).join("") || "<p>暂无计算。</p>"}
+        </section>
+      </div>
+      ${
+        result.actions?.length
+          ? `<section class="finance-qa-actions">
+              <h3>可采纳行动</h3>
+              <div>
+                ${result.actions.map((item, index) => `
+                  <article>
+                    <span>A${index + 1} · ${escapeHtml(item.title || "问答行动")}</span>
+                    <strong>${escapeHtml(item.action || item.title || "")}</strong>
+                    <p>${escapeHtml(item.reason || "")}</p>
+                    <button
+                      class="ghost-button"
+                      data-finance-ai-action-decision="adopted"
+                      data-ai-action-month="${escapeHtml(month)}"
+                      data-ai-action-key="${escapeHtml(`qa-${item.key || index + 1}`)}"
+                      data-ai-action-label="问答"
+                      data-ai-action-title="${escapeHtml(item.title || "问答行动")}"
+                      data-ai-action-text="${escapeHtml(item.action || item.title || "")}"
+                      data-ai-action-metric="${escapeHtml(`问答 · ${Number(item.score || 0)}分`)}"
+                      data-ai-action-score="${escapeHtml(String(item.score || 0))}"
+                      data-ai-action-reason="${escapeHtml(item.reason || "")}"
+                      type="button"
+                    >采纳为行动</button>
+                  </article>
+                `).join("")}
+              </div>
+            </section>`
+          : ""
+      }
+      ${
+        result.followUps?.length
+          ? `<section class="finance-qa-followups">
+              <h3>可以继续问</h3>
+              ${result.followUps.map((item) => `<button class="ghost-button" data-finance-qa-sample="${escapeHtml(item)}" type="button">${escapeHtml(item)}</button>`).join("")}
+            </section>`
+          : ""
+      }
+    `;
+  }
+
+  function showFinanceQaDialog(month) {
+    const dialog = document.createElement("dialog");
+    dialog.className = "modal finance-qa-modal";
+    const samples = ["为什么这个月风险高？", "钱主要花到哪里了？", "下个月怎么控制？", "如果餐饮减少 20%，结余会变多少？", "哪些订阅可以暂停？", "未来三个月压力大不大？"];
+    dialog.innerHTML = `
+      <section class="modal-panel finance-qa-panel">
+        <div class="drawer-head">
+          <div>
+            <span class="eyebrow">FINANCE Q&A</span>
+            <h2>${escapeHtml(month)} 财务问答助手</h2>
+          </div>
+          <button class="icon-button" data-close-finance-qa type="button" aria-label="关闭">×</button>
+        </div>
+        <form class="finance-qa-form" data-finance-qa-form>
+          <label>
+            <span>问题</span>
+            <textarea name="question" rows="3" placeholder="直接问你的账本，例如：如果餐饮减少 20%，结余会变多少？"></textarea>
+          </label>
+          <div class="finance-qa-options">
+            <label><input type="checkbox" name="includeTransactions" /> 包含脱敏逐笔流水（仅本次问答，最多 120 条）</label>
+          </div>
+          <div class="finance-qa-samples">
+            ${samples.map((item) => `<button class="ghost-button" data-finance-qa-sample="${escapeHtml(item)}" type="button">${escapeHtml(item)}</button>`).join("")}
+          </div>
+          <button class="primary-button" type="submit">提问</button>
+        </form>
+        <div class="finance-qa-result" data-finance-qa-result>
+          <article class="finance-ai-loading">默认只发送聚合摘要；勾选后才发送脱敏逐笔流水。</article>
+        </div>
+      </section>
+    `;
+    const close = () => {
+      dialog.close();
+      dialog.remove();
+    };
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog || event.target.closest("[data-close-finance-qa]")) close();
+      const sample = event.target.closest("[data-finance-qa-sample]");
+      if (sample) {
+        dialog.querySelector('[name="question"]').value = sample.dataset.financeQaSample || "";
+      }
+    });
+    dialog.addEventListener("submit", async (event) => {
+      if (!event.target.matches("[data-finance-qa-form]")) return;
+      event.preventDefault();
+      const form = event.target;
+      const resultBox = dialog.querySelector("[data-finance-qa-result]");
+      const question = String(new FormData(form).get("question") || "").trim();
+      const includeTransactions = Boolean(form.querySelector('[name="includeTransactions"]')?.checked);
+      if (!question) {
+        resultBox.innerHTML = `<article class="finance-ai-loading is-error">请先输入问题。</article>`;
+        return;
+      }
+      resultBox.innerHTML = `<article class="finance-ai-loading">正在调用大模型分析${includeTransactions ? "（包含脱敏流水）" : "（仅聚合摘要）"}...</article>`;
+      try {
+        const summary = buildFinanceAiSummary(app.store.getData(), month, { includeTransactions });
+        const result = await requestFinanceQuestion(question, summary);
+        resultBox.innerHTML = renderFinanceQaResult(result, summary.month);
+      } catch (error) {
+        resultBox.innerHTML = `<article class="finance-ai-loading is-error">${escapeHtml(error.message || "财务问答失败。")}</article>`;
+      }
+    });
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      close();
+    });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+  }
+
   function formatReportCurrency(value) {
     const amount = Number(value || 0);
     return `¥${amount.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`;
@@ -924,7 +1311,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
     const month = note?.billReportMonth || String(note?.title || "").match(/\d{4}-\d{2}/)?.[0] || "未记录";
     const qualityStatus = report.qualityStatus || "旧版";
     const sections = getBillReportSections(note?.content || "");
-    const priorityTitles = ["核心摘要", "风险提醒", "预算节奏", "未来计划", "分类流向", "行动清单", "月报结论"];
+    const priorityTitles = ["核心摘要", "智能分析摘要", "AI 行动采纳复盘", "风险提醒", "预算节奏", "未来计划", "分类流向", "行动清单", "月报结论"];
     const primarySections = priorityTitles
       .map((title) => sections.find((section) => section.title === title))
       .filter(Boolean);
@@ -953,7 +1340,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
           <article><span>最大流向</span><strong>${escapeHtml(report.topCategory || "暂无")}</strong><small>${formatReportCurrency(report.topCategoryAmount)}</small></article>
           <article><span>待处理风险</span><strong>${escapeHtml(String(report.riskCount ?? 0))} 项</strong><small>高优先级事项</small></article>
           <article><span>未来缺口</span><strong>${formatReportCurrency(report.futureGap)}</strong><small>未来 3 个月计划/续费</small></article>
-          <article><span>行动完成</span><strong>${escapeHtml(String(report.actionDone ?? 0))}/${escapeHtml(String(report.actionTotal ?? 0))}</strong><small>本月行动清单</small></article>
+          <article><span>行动完成</span><strong>${escapeHtml(String(report.actionDone ?? 0))}/${escapeHtml(String(report.actionTotal ?? 0))}</strong><small>AI 采纳 ${escapeHtml(String(report.aiActionTotal ?? 0))} · 忽略 ${escapeHtml(String(report.aiActionIgnored ?? 0))}</small></article>
         </section>
         ${renderBillReportForecastSnapshot(report)}
         ${renderBillReportForecastCheck(report)}
@@ -1868,6 +2255,62 @@ export function bindEvents(app, elements, renderer, formController, authControll
     if (billActionDetailTarget && !event.target.closest("button")) {
       event.preventDefault();
       showBillActionDetailDialog(billActionDetailTarget);
+      return;
+    }
+
+    const financeAiAnalysisButton = event.target.closest("[data-finance-ai-analysis]");
+    if (financeAiAnalysisButton) {
+      event.preventDefault();
+      await showFinanceAiAnalysisDialog(financeAiAnalysisButton.dataset.financeAiAnalysis || new Date().toISOString().slice(0, 7));
+      return;
+    }
+
+    const financeQaButton = event.target.closest("[data-finance-qa]");
+    if (financeQaButton) {
+      event.preventDefault();
+      if (financeQaButton.dataset.financeQaDragged === "true") {
+        delete financeQaButton.dataset.financeQaDragged;
+        return;
+      }
+      showFinanceQaDialog(financeQaButton.dataset.financeQa || new Date().toISOString().slice(0, 7));
+      return;
+    }
+
+    const financeAiActionDecisionButton = event.target.closest("[data-finance-ai-action-decision]");
+    if (financeAiActionDecisionButton) {
+      event.preventDefault();
+      if (!(await ensureAuth())) return;
+      const decision = financeAiActionDecisionButton.dataset.financeAiActionDecision;
+      const payload = {
+        key: financeAiActionDecisionButton.dataset.aiActionKey,
+        label: financeAiActionDecisionButton.dataset.aiActionLabel,
+        title: financeAiActionDecisionButton.dataset.aiActionTitle,
+        text: financeAiActionDecisionButton.dataset.aiActionText,
+        metric: financeAiActionDecisionButton.dataset.aiActionMetric,
+        score: Number(financeAiActionDecisionButton.dataset.aiActionScore || 0),
+        reason: financeAiActionDecisionButton.dataset.aiActionReason,
+      };
+      if (decision === "modify") {
+        const nextTitle = window.prompt("行动标题", payload.title || "");
+        if (nextTitle === null) return;
+        const nextText = window.prompt("行动内容", payload.text || "");
+        if (nextText === null) return;
+        payload.title = nextTitle.trim() || payload.title;
+        payload.text = nextText.trim() || payload.text;
+      }
+      const ok = app.store.saveBillAiActionDecision(
+        financeAiActionDecisionButton.dataset.aiActionMonth,
+        payload,
+        decision === "ignored" ? "ignored" : "adopted",
+      );
+      if (!ok) {
+        window.alert("AI 行动处理失败。");
+        return;
+      }
+      renderer.render();
+      const dialog = financeAiActionDecisionButton.closest(".finance-ai-analysis-modal");
+      dialog?.close();
+      dialog?.remove();
       return;
     }
 
