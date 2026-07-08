@@ -23841,3 +23841,36 @@ body:not(.dark) .ui-state--success {
     font-size: 22px;
   }
 }
+
+/* Final override: keep active top navigation readable after deployment cache/order changes */
+.topbar .nav-item.active,
+.topbar .nav-item[aria-current="page"],
+body:not(.dark) .topbar .nav-item.active,
+body:not(.dark) .topbar .nav-item[aria-current="page"] {
+  border-color: #111815 !important;
+  background: #111815 !important;
+  color: #ffffff !important;
+}
+
+.topbar .nav-item.active span,
+.topbar .nav-item[aria-current="page"] span,
+.topbar .nav-item.active .nav-icon,
+.topbar .nav-item[aria-current="page"] .nav-icon,
+.topbar .nav-item.active .nav-icon-svg,
+.topbar .nav-item[aria-current="page"] .nav-icon-svg,
+body:not(.dark) .topbar .nav-item.active span,
+body:not(.dark) .topbar .nav-item[aria-current="page"] span,
+body:not(.dark) .topbar .nav-item.active .nav-icon,
+body:not(.dark) .topbar .nav-item[aria-current="page"] .nav-icon,
+body:not(.dark) .topbar .nav-item.active .nav-icon-svg,
+body:not(.dark) .topbar .nav-item[aria-current="page"] .nav-icon-svg {
+  color: #ffffff !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.topbar .nav-item.active .nav-icon-svg,
+.topbar .nav-item[aria-current="page"] .nav-icon-svg {
+  fill: none !important;
+  stroke: currentColor !important;
+}
