@@ -21490,3 +21490,106 @@ body:not(.dark) .topbar .nav-item[aria-current="page"] .nav-icon-svg {
   }
 }
 
+/* Mobile scroll hotfix: keep page content in normal document flow on phones. */
+@media (max-width: 760px) {
+  html,
+  body,
+  .app-shell,
+  .workspace,
+  .content-area {
+    height: auto !important;
+    min-height: 100%;
+    overflow-y: visible !important;
+  }
+
+  .bill-dashboard-layout,
+  .favor-dashboard-layout,
+  .subscription-control-layout {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .bill-dashboard-layout__side,
+  .favor-dashboard-layout__side,
+  .subscription-control-side {
+    position: static !important;
+    inset: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    transform: none !important;
+  }
+
+  .bill-dashboard-layout__side .quick-note-form,
+  .favor-dashboard-layout__side .quick-note-form,
+  .subscription-control-side .quick-note-form,
+  .subscription-entry-panel,
+  .finance-entry-panel,
+  .favor-entry-panel,
+  .favor-entry-section {
+    position: static !important;
+    top: auto !important;
+    bottom: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .subscription-entry-panel .panel-head,
+  .subscription-entry-panel .settings-action-row,
+  .finance-entry-panel .panel-head,
+  .favor-entry-panel .favor-entry-head {
+    position: static !important;
+    top: auto !important;
+    bottom: auto !important;
+  }
+
+  .workspace {
+    padding-bottom: calc(104px + var(--safe-bottom)) !important;
+  }
+}
+
+/* Mobile scroll hotfix narrow override: beat older <=420px fixed-sheet rules. */
+@media (max-width: 420px) {
+  .page-bills .bill-dashboard-layout__side,
+  .page-favors .favor-dashboard-layout__side,
+  .page-subscriptions .subscription-control-side,
+  .bill-dashboard-layout__side,
+  .favor-dashboard-layout__side,
+  .subscription-control-side {
+    position: static !important;
+    inset: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    transform: none !important;
+  }
+
+  .page-bills .bill-dashboard-layout__side .finance-entry-panel,
+  .page-favors .favor-entry-panel,
+  .page-subscriptions .subscription-entry-panel,
+  .bill-dashboard-layout__side .quick-note-form,
+  .favor-dashboard-layout__side .quick-note-form,
+  .subscription-control-side .quick-note-form {
+    position: static !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}
+
