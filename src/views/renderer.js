@@ -462,7 +462,7 @@ function renderNav(elements, ui) {
   elements.navList.innerHTML = visibleItems
     .map(
       (item) => `
-        <button class="nav-item ${ui.activePage === item.id ? "active" : ""}" data-page="${item.id}" type="button">
+        <button class="nav-item ${ui.activePage === item.id ? "active" : ""}" data-page="${item.id}" type="button" ${ui.activePage === item.id ? 'aria-current="page"' : ""}>
           <span class="nav-icon">${navIconSvg(item.icon)}</span>
           <span>${item.label}</span>
         </button>
@@ -474,7 +474,7 @@ function renderNav(elements, ui) {
     .filter((item) => mobileIds.includes(item.id))
     .map(
       (item) => `
-        <button class="${ui.activePage === item.id ? "active" : ""}" data-page="${item.id}" type="button">
+        <button class="${ui.activePage === item.id ? "active" : ""}" data-page="${item.id}" type="button" ${ui.activePage === item.id ? 'aria-current="page"' : ""}>
           <span class="mobile-tab-icon">${navIconSvg(item.icon)}</span><br />${item.label}
         </button>
       `,
