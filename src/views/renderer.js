@@ -15,6 +15,7 @@ import {
   budgetProgressCard,
   emptyState,
   kpiStrip,
+  mobileCompactCard,
   recentViewRow,
   searchResultCard,
   sectionHeader,
@@ -24,7 +25,7 @@ import {
   toolsPanel,
 } from "./templates.js";
 
-const mobileIds = ["dashboard", "tasks", "bills", "subscriptions", "favors"];
+const mobileIds = ["dashboard", "bills", "tasks", "more"];
 
 const favorRelationTypes = ["亲戚", "朋友", "同事", "同学", "邻里", "合作", "其他"];
 const favorEventTypes = ["婚礼", "满月", "生日", "乔迁", "节日", "升学", "探病", "其他"];
@@ -475,8 +476,13 @@ function renderNav(elements, ui) {
     )
     .join("");
 
-  elements.mobileTabs.innerHTML = visibleItems
-    .filter((item) => mobileIds.includes(item.id))
+  const mobileSourceItems = [
+    ...visibleItems,
+    { id: "more", label: "更多", icon: "settings", eyebrow: "More" },
+  ];
+  const mobileItems = mobileIds.map((id) => mobileSourceItems.find((item) => item.id === id)).filter(Boolean);
+
+  elements.mobileTabs.innerHTML = mobileItems
     .map(
       (item) => `
         <button class="${ui.activePage === item.id ? "active" : ""}" data-page="${item.id}" type="button" ${ui.activePage === item.id ? 'aria-current="page"' : ""}>
@@ -612,6 +618,7 @@ function renderDashboard(elements, data, ui, recentViews, store) {
   const subscriptionSummary = getSubscriptionReminderSummary(data.subscriptions || []);
   const subscriptionsOverview = store?.getSubscriptionsOverview?.() || { estimatedMonthlyCost: 0, upcoming: [], urgent: [] };
   const favorStats = store?.getFavorStats?.() || { received: 0, given: 0, balance: 0, totalContacts: 0 };
+  const pendingFavorReturns = store?.getPendingFavorReturns?.() || [];
   const pendingTasks = tasks.filter((task) => task.status !== "已完成");
   const todayTasks = pendingTasks.filter((task) => isDueToday(task)).slice(0, 4);
   const overdueTasks = pendingTasks.filter(isOverdue);
@@ -678,6 +685,16 @@ function renderDashboard(elements, data, ui, recentViews, store) {
           <div class="dashboard-health-meter" style="--dashboard-health:${healthScore}%"><i></i></div>
           <small>${healthScore} / 100 · 支出率 ${financeSummary.income > 0 ? `${Math.round(financeSummary.expenseRate * 100)}%` : "缺少收入"} · ${excludedBills.length} 条不计入</small>
         </aside>
+      </section>
+
+      <section class="mobile-dashboard-priority" aria-label="移动端今日摘要">
+        <button class="mobile-dashboard-quick-add primary-button" id="dashboardMobileQuickAdd" type="button">+ 快速新增</button>
+        <div class="mobile-dashboard-cards">
+          ${mobileCompactCard({ type: "bills", id: bills[0]?.id || "", title: "本月结余", value: formatCurrency(financeSummary.balance), date: month, tag: financeSummary.balance < 0 ? "现金流风险" : "现金流" })}
+          ${mobileCompactCard({ type: "tasks", id: (todayTasks[0] || pendingTasks[0])?.id || "", title: todayTasks[0]?.title || pendingTasks[0]?.title || "暂无今日事项", value: todayTasks.length ? `${todayTasks.length} 项今日` : `${pendingTasks.length} 项待办`, date: (todayTasks[0] || pendingTasks[0])?.dueDate || "", tag: overdueTasks.length ? "逾期" : "事项" })}
+          ${mobileCompactCard({ type: "subscriptions", id: subscriptionsOverview.upcoming?.[0]?.id || subscriptionsOverview.items?.[0]?.id || "", title: subscriptionsOverview.upcoming?.[0]?.name || "暂无临期订阅", value: `${subscriptionsOverview.upcoming?.length || 0} 项`, date: subscriptionsOverview.upcoming?.[0]?.nextRenewalDate || "", tag: "续费" })}
+          ${mobileCompactCard({ type: "favors", id: pendingFavorReturns[0]?.id || "", title: pendingFavorReturns[0]?.title || "暂无待回礼", value: pendingFavorReturns.length ? `${pendingFavorReturns.length} 项` : formatCurrency(Math.abs(favorStats.balance || 0)), date: pendingFavorReturns[0]?.date || "", tag: "人情" })}
+        </div>
       </section>
 
       <section class="dashboard-priority-section page-standard-section">
@@ -832,8 +849,29 @@ function renderTasks(elements, data, ui) {
       `;
     })
     .join("");
+  const taskCompactItems = [...todayTasks, ...overdueTasks, ...activeTasks]
+    .filter((task, index, list) => list.findIndex((item) => item.id === task.id) === index)
+    .slice(0, 8);
 
   elements.contentArea.innerHTML = `
+    <section class="panel mobile-task-priority">
+      ${sectionHeader({ eyebrow: "MOBILE TASKS", title: "今日优先事项", description: "移动端优先展示今日、逾期和进行中的事项。" })}
+      <div class="mobile-compact-list">
+        ${taskCompactItems
+          .map((task) =>
+            mobileCompactCard({
+              type: "tasks",
+              id: task.id,
+              title: task.title,
+              value: task.status || "待处理",
+              date: task.dueDate || "未设置日期",
+              tag: task.priority || "事项",
+              tone: isOverdue(task) ? "risk" : task.status === "进行中" ? "watch" : "",
+            }),
+          )
+          .join("") || emptyState("暂无待处理事项")}
+      </div>
+    </section>
     <div class="stats-grid">
       ${statCard("今日事项", todayTasks.length, "截止日期为今天")}
       ${statCard("逾期事项", overdueTasks.length, "需要优先处理")}
@@ -4284,6 +4322,35 @@ function renderBills(elements, data, ui, store) {
 
   elements.contentArea.innerHTML = `
     <div class="page-standard-stack core-page-shell">
+    <section class="panel mobile-bill-summary">
+      ${sectionHeader({
+        eyebrow: "MOBILE BILLS",
+        title: `${summary.month} 快速账本`,
+        description: "移动端先看结余、风险和最近流水，复杂分析下移。",
+        actions: `<button class="primary-button" id="mobileBillQuickAdd" type="button">快速记账</button>`,
+      })}
+      <div class="mobile-bill-kpis">
+        ${statCard("本月结余", formatCurrency(summary.balance), `收入 ${formatCurrency(summary.income)}`)}
+        ${statCard("本月支出", formatCurrency(summary.expense), `${risks.length} 条风险提醒`)}
+      </div>
+      <div class="mobile-compact-list">
+        ${(data.bills || [])
+          .filter((bill) => String(bill.date || "").startsWith(month))
+          .slice(0, 5)
+          .map((bill) =>
+            mobileCompactCard({
+              type: "bills",
+              id: bill.id,
+              title: bill.title,
+              value: `${bill.type === "收入" ? "+" : "-"}${formatCurrency(bill.amount)}`,
+              date: bill.date || "未设置日期",
+              tag: bill.category || "未分类",
+              tone: bill.type === "收入" ? "good" : "",
+            }),
+          )
+          .join("") || emptyState("本月暂无流水")}
+      </div>
+    </section>
     <div class="bill-dashboard-layout">
       <main class="bill-dashboard-layout__main">
         ${billCommandHero(summary, commitments, risks)}
@@ -5800,6 +5867,34 @@ function renderFavorites(elements, data, ui) {
   `;
 }
 
+function renderMore(elements) {
+  elements.filterRow.innerHTML = "";
+  const moreItems = [
+    { page: "subscriptions", title: "订阅", text: "续费、复盘、成本与通知", tag: "续费" },
+    { page: "favors", title: "人情往来", text: "关系台账、待回礼与往来记录", tag: "关系" },
+    { page: "favorites", title: "收藏夹", text: "外部资料和常用链接", tag: "资料" },
+    { page: "settings", title: "设置", text: "同步、备份、通知与账号", tag: "管理" },
+  ];
+  elements.contentArea.innerHTML = `
+    <section class="panel mobile-more-panel">
+      ${sectionHeader({ eyebrow: "MORE", title: "更多功能", description: "移动端保留高频入口，低频模块集中放在这里。" })}
+      <div class="mobile-more-grid">
+        ${moreItems
+          .map(
+            (item) => `
+              <button class="mobile-more-card" data-page-jump="${escapeHtml(item.page)}" type="button">
+                <span class="tag">${escapeHtml(item.tag)}</span>
+                <strong>${escapeHtml(item.title)}</strong>
+                <small>${escapeHtml(item.text)}</small>
+              </button>
+            `,
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
 function buildSettingsSubscriptionPreviewItems(subscriptions) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -6509,7 +6604,7 @@ export function createRenderer(app, elements) {
   return {
     render() {
       const data = app.store.getData();
-      const activeNavItem = navItems.find((item) => item.id === app.ui.activePage);
+      const activeNavItem = app.ui.activePage === "more" ? { id: "more", label: "更多", eyebrow: "More" } : navItems.find((item) => item.id === app.ui.activePage);
       const current = activeNavItem && (app.ui.activePage === "search" || !activeNavItem.hidden) ? activeNavItem : navItems[0];
       const recentViews = app.store.getRecentViews();
       if (app.ui.activePage !== current.id) {
@@ -6533,6 +6628,7 @@ export function createRenderer(app, elements) {
         favors: () => renderFavors(elements, data, app.ui, app.store),
         favorites: () => renderFavorites(elements, data, app.ui),
         settings: () => renderSettings(elements, data, app.ui, app.authController),
+        more: () => renderMore(elements),
         search: () => renderSearchResults(elements, data, app.ui),
       };
 

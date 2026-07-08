@@ -56,6 +56,19 @@ export function toolsPanel({ title, description = "", actions = "" }) {
   `;
 }
 
+export function mobileCompactCard({ type, id, title, value = "", date = "", tag = "", tone = "" }) {
+  return `
+    <article class="mobile-compact-card ${tone ? `mobile-compact-card--${escapeHtml(tone)}` : ""}" data-open="${escapeHtml(type)}:${escapeHtml(id)}" tabindex="0">
+      <div>
+        ${tag ? `<span class="tag">${escapeHtml(tag)}</span>` : ""}
+        <strong>${escapeHtml(title || "未命名")}</strong>
+        ${date ? `<small>${escapeHtml(date)}</small>` : ""}
+      </div>
+      ${value ? `<b>${escapeHtml(value)}</b>` : ""}
+    </article>
+  `;
+}
+
 export function emptyState(text) {
   return `<div class="empty">${escapeHtml(text)}</div>`;
 }

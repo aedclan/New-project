@@ -2986,7 +2986,13 @@ export function bindEvents(app, elements, renderer, formController, authControll
       return;
     }
 
-    if (event.target.id === "quickAddButton" || event.target.id === "dashboardQuickAdd") {
+    if (event.target.id === "mobileBillQuickAdd") {
+      if (!(await ensureAuth())) return;
+      formController.openCreate("bills");
+      return;
+    }
+
+    if (event.target.id === "quickAddButton" || event.target.id === "dashboardQuickAdd" || event.target.id === "dashboardMobileQuickAdd") {
       if (!(await ensureAuth())) return;
       formController.openCreate();
       return;

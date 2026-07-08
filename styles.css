@@ -21334,3 +21334,159 @@ body:not(.dark) .topbar .nav-item[aria-current="page"] .nav-icon-svg {
   }
 }
 
+/* Phase 8 mobile optimization */
+.mobile-dashboard-priority,
+.mobile-task-priority,
+.mobile-bill-summary,
+.mobile-more-panel {
+  display: none;
+}
+
+.mobile-compact-list,
+.mobile-dashboard-cards,
+.mobile-more-grid {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.mobile-compact-card,
+.mobile-more-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  color: var(--text);
+  text-align: left;
+}
+
+.mobile-more-card {
+  grid-template-columns: 1fr;
+}
+
+.mobile-compact-card strong,
+.mobile-more-card strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-compact-card small,
+.mobile-more-card small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mobile-compact-card b {
+  color: var(--text);
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+.mobile-compact-card--risk b,
+.mobile-compact-card--risk strong {
+  color: var(--danger);
+}
+
+.mobile-compact-card--watch b,
+.mobile-compact-card--watch strong {
+  color: var(--warning);
+}
+
+.mobile-compact-card--good b,
+.mobile-compact-card--good strong {
+  color: var(--success);
+}
+
+.mobile-bill-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+@media (max-width: 680px) {
+  .mobile-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  .mobile-dashboard-priority,
+  .mobile-task-priority,
+  .mobile-bill-summary,
+  .mobile-more-panel {
+    display: grid;
+    gap: var(--container-gap);
+  }
+
+  .dashboard-priority-section,
+  .dashboard-notification-strip,
+  .dashboard-lower-grid,
+  .dashboard-recent-panel,
+  .dashboard-task-panel {
+    display: none !important;
+  }
+
+  .mobile-dashboard-quick-add {
+    width: 100%;
+    min-height: 46px;
+  }
+
+  .page-tasks .stats-grid,
+  .page-tasks .kanban-board,
+  .page-tasks .panel:not(.mobile-task-priority) {
+    display: none !important;
+  }
+
+  .page-bills .bill-dashboard-layout,
+  .page-bills .tools-panel,
+  .page-bills .finance-qa-float {
+    display: none !important;
+  }
+
+  .mobile-bill-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .entry-form .modal-scroll,
+  #entryForm .modal-scroll {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  #entryForm .field-section {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: var(--space-3);
+  }
+
+  #entryForm [data-section="bills"] {
+    order: -1;
+  }
+
+  #entryForm label,
+  #entryForm input,
+  #entryForm select,
+  #entryForm textarea {
+    min-width: 0;
+  }
+
+  .drawer {
+    inset: auto var(--space-2) calc(var(--safe-bottom) + 72px) var(--space-2) !important;
+    width: auto !important;
+    max-height: 76vh;
+    border-radius: 20px 20px 16px 16px;
+  }
+
+  .drawer.open {
+    transform: translateY(0) !important;
+  }
+}
+
