@@ -7,6 +7,55 @@ const typeLabels = {
   collections: "项目集",
 };
 
+export function sectionHeader({ eyebrow = "", title, description = "", actions = "" }) {
+  return `
+    <div class="standard-section-head">
+      <div>
+        ${eyebrow ? `<span class="eyebrow">${escapeHtml(eyebrow)}</span>` : ""}
+        <h2>${escapeHtml(title)}</h2>
+        ${description ? `<p>${escapeHtml(description)}</p>` : ""}
+      </div>
+      ${actions ? `<div class="standard-section-head__actions">${actions}</div>` : ""}
+    </div>
+  `;
+}
+
+export function kpiStrip(items) {
+  return `
+    <div class="kpi-strip">
+      ${items
+        .map((item) => statCard(item.label, item.value, item.hint || ""))
+        .join("")}
+    </div>
+  `;
+}
+
+export function actionRiskItem({ eyebrow = "", title, text = "", action = "", tone = "watch" }) {
+  const safeTone = ["risk", "watch", "good"].includes(tone) ? tone : "watch";
+  return `
+    <article class="action-risk-item action-risk-item--${safeTone}">
+      <div class="action-risk-item__main">
+        ${eyebrow ? `<span>${escapeHtml(eyebrow)}</span>` : ""}
+        <strong>${escapeHtml(title)}</strong>
+        ${text ? `<p>${escapeHtml(text)}</p>` : ""}
+      </div>
+      ${action || ""}
+    </article>
+  `;
+}
+
+export function toolsPanel({ title, description = "", actions = "" }) {
+  return `
+    <section class="tools-panel">
+      <div>
+        <strong>${escapeHtml(title)}</strong>
+        ${description ? `<small>${escapeHtml(description)}</small>` : ""}
+      </div>
+      ${actions ? `<div class="tools-panel__actions">${actions}</div>` : ""}
+    </section>
+  `;
+}
+
 export function emptyState(text) {
   return `<div class="empty">${escapeHtml(text)}</div>`;
 }
@@ -251,6 +300,19 @@ export function subscriptionCard(item) {
   const usageLabels = { high: "高频", occasional: "偶尔", rare: "少用", unknown: "未记录" };
   const necessityLabels = { essential: "必需", replaceable: "可替代", optional: "可取消", unknown: "未判断" };
   const statusLabels = { active: "使用中", paused: "已暂停", cancelled: "已取消" };
+  const health = item.health || { label: "继续观察", level: "good", reasons: [] };
+  const latestPayment = item.latestPayment;
+  const paymentHtml = latestPayment
+    ? `<div class="subscription-payment-summary">
+        <span>最近付款</span>
+        <strong>${formatCurrency(latestPayment.amount)}</strong>
+        <small>${escapeHtml(latestPayment.date || "未记录日期")} · ${escapeHtml(latestPayment.title || latestPayment.source || "订阅扣费")}</small>
+      </div>`
+    : `<div class="subscription-payment-summary subscription-payment-summary--empty">
+        <span>最近付款</span>
+        <strong>暂无记录</strong>
+        <small>生成账单后会在这里显示最近一次扣费</small>
+      </div>`;
 
   return `
     <article class="content-card subscription-card subscription-info-card subscription-card--${escapeHtml(item.level || "normal")}">
@@ -272,6 +334,8 @@ export function subscriptionCard(item) {
         <span>${escapeHtml(cycleLabel)}</span>
         <span>${item.autoRenew ? "自动续费" : "手动续费"}</span>
         <span>${escapeHtml(statusLabels[item.status] || item.status || "使用中")}</span>
+        <span class="subscription-health-chip subscription-health-chip--${escapeHtml(health.level || "good")}">${escapeHtml(health.label)}</span>
+        ${item.nextActionReminderDate ? `<span>提醒 ${escapeHtml(item.nextActionReminderDate)}</span>` : ""}
         ${item.websiteUrl ? `<span>网址 ${escapeHtml(item.websiteUrl)}</span>` : ""}
         ${item.accountName ? `<span>账号 ${escapeHtml(item.accountName)}</span>` : ""}
         ${item.accountPassword ? "<span>密码已保存</span>" : ""}
@@ -298,11 +362,22 @@ export function subscriptionCard(item) {
         </div>`
             : ""
         }
+        ${
+          health.reasons?.length
+            ? `<div>
+          <strong>${escapeHtml(health.label)}</strong>
+          <span>${escapeHtml(health.reasons.slice(0, 2).join(" / "))}</span>
+        </div>`
+            : ""
+        }
       </div>
+      ${paymentHtml}
       <div class="subscription-info-card__actions">
         <button class="ghost-button" data-subscription-bill="${escapeHtml(item.id)}" type="button">生成账单</button>
         <button class="primary-button" data-subscription-renew="${escapeHtml(item.id)}" type="button">确认续费</button>
         <button class="ghost-button" data-subscription-review="${escapeHtml(item.id)}" type="button">复盘</button>
+        <button class="ghost-button" data-subscription-evaluated="${escapeHtml(item.id)}" type="button">标记已评估</button>
+        <button class="ghost-button" data-subscription-reminder="${escapeHtml(item.id)}" type="button">创建提醒事项</button>
         ${
           item.status === "paused"
             ? `<button class="ghost-button" data-subscription-status="${escapeHtml(item.id)}:active" type="button">恢复</button>`

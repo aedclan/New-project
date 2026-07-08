@@ -131,6 +131,21 @@ export async function runBrowserSubscriptionNotifications(items, settings = load
   return dueItems.length;
 }
 
+export function buildSubscriptionEmailPreview(items, settings = loadSubscriptionNotificationSettings()) {
+  const dueItems = getSubscriptionsDueForNotification(items, settings);
+  const lines = dueItems.slice(0, 6).map((item, index) => {
+    const cost = Number(item.amount || item.monthlyCost || 0).toFixed(2);
+    const action = item.autoRenew ? "确认自动续费是否仍需要" : "手动确认是否续费";
+    return `${index + 1}. ${item.name}｜${item.reminderLabel || "到期提醒"}｜金额 ¥${cost}｜${action}`;
+  });
+  return {
+    count: dueItems.length,
+    subject: dueItems.length ? `订阅到期提醒：${dueItems.length} 项需要关注` : "订阅到期提醒：暂无需要发送的项目",
+    text: lines.length ? lines.join("\n") : "当前通知设置下暂无需要发送的订阅提醒。",
+    items: dueItems,
+  };
+}
+
 export async function postSubscriptionEmail(endpoint, payload) {
   const response = await fetch(endpoint, {
     method: "POST",

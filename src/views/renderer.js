@@ -1,5 +1,6 @@
 ﻿import { escapeHtml, excerptText, formatCurrency, renderMarkdown } from "../core/utils.js";
 import {
+  buildSubscriptionEmailPreview,
   getSubscriptionReminderSummary,
   groupSubscriptionReminders,
   loadSubscriptionNotificationSettings,
@@ -9,14 +10,18 @@ import { loadServerSyncState } from "../core/server-sync.js";
 import { getPinyinSearchText } from "../core/utils.js";
 import { navItems } from "../data/nav-items.js";
 import {
+  actionRiskItem,
   billRow,
   budgetProgressCard,
   emptyState,
+  kpiStrip,
   recentViewRow,
   searchResultCard,
+  sectionHeader,
   statCard,
   subscriptionCard,
   taskRow,
+  toolsPanel,
 } from "./templates.js";
 
 const mobileIds = ["dashboard", "tasks", "bills", "subscriptions", "favors"];
@@ -462,7 +467,7 @@ function renderNav(elements, ui) {
   elements.navList.innerHTML = visibleItems
     .map(
       (item) => `
-        <button class="nav-item ${ui.activePage === item.id ? "active" : ""}" data-page="${item.id}" type="button">
+        <button class="nav-item ${ui.activePage === item.id ? "active" : ""}" data-page="${item.id}" type="button" ${ui.activePage === item.id ? 'aria-current="page"' : ""}>
           <span class="nav-icon">${navIconSvg(item.icon)}</span>
           <span>${item.label}</span>
         </button>
@@ -474,7 +479,7 @@ function renderNav(elements, ui) {
     .filter((item) => mobileIds.includes(item.id))
     .map(
       (item) => `
-        <button class="${ui.activePage === item.id ? "active" : ""}" data-page="${item.id}" type="button">
+        <button class="${ui.activePage === item.id ? "active" : ""}" data-page="${item.id}" type="button" ${ui.activePage === item.id ? 'aria-current="page"' : ""}>
           <span class="mobile-tab-icon">${navIconSvg(item.icon)}</span><br />${item.label}
         </button>
       `,
@@ -648,133 +653,134 @@ function renderDashboard(elements, data, ui, recentViews, store) {
     !forecastPrimaryRisk && !unclassifiedBills.length && !subscriptionsOverview.upcoming?.length && !overdueTasks.length ? dashboardQueueItem("暂无紧急处理", "关键事项处于可控状态", "查看总账", { page: "bills" }, "good") : "",
   ].filter(Boolean);
 
+  const dashboardRiskItems = financeRisks.slice(0, 4);
+  const dashboardTasks = (todayTasks.length ? todayTasks : pendingTasks.slice(0, 3)).slice(0, 3);
+
   elements.contentArea.innerHTML = `
-    <section class="dashboard-command">
-      <div class="dashboard-command__main">
-        <div class="dashboard-command__kicker">
-          <span class="eyebrow">COMMAND CENTER</span>
-          <b>${escapeHtml(month)}</b>
+    <div class="page-standard-stack core-page-shell dashboard-command-center">
+      <section class="dashboard-command dashboard-command--compact">
+        <div class="dashboard-command__main">
+          <div class="dashboard-command__kicker">
+            <span class="eyebrow">COMMAND CENTER</span>
+            <b>${escapeHtml(month)}</b>
+          </div>
+          <h2>今天优先关注：${escapeHtml(topFinanceRisk.title)}</h2>
+          <p>${escapeHtml(decisionText)}</p>
+          <div class="dashboard-command__actions">
+            <button class="primary-button" data-dashboard-open-ledger="${escapeHtml(month)}" type="button">复核完整流水</button>
+            <button class="ghost-button" id="dashboardQuickAdd" type="button">新增记录</button>
+            <button class="ghost-button" data-page-jump="bills" type="button">进入生活收支</button>
+          </div>
         </div>
-        <h2>今天优先关注：${escapeHtml(topFinanceRisk.title)}</h2>
-        <p>${escapeHtml(decisionText)}</p>
-        <div class="dashboard-command__facts">
-          <span>现金流 <strong>${formatCurrency(financeSummary.balance)}</strong></span>
-          <span>下月预计 <strong>${formatCurrency(financeForecast.nextMonth.balance)}</strong></span>
-          <span>人情差额 <strong>${formatCurrency(favorStats.balance || 0)}</strong></span>
-          <span>待处理 <strong>${escapeHtml(String(queueItems.length))} 项</strong></span>
+        <aside class="dashboard-command__status dashboard-command__status--${healthStatus === "风险" ? "risk" : healthStatus === "关注" ? "watch" : "good"}">
+          <span>${escapeHtml(month)} 综合评分</span>
+          <strong>${escapeHtml(healthStatus)}</strong>
+          <div class="dashboard-health-meter" style="--dashboard-health:${healthScore}%"><i></i></div>
+          <small>${healthScore} / 100 · 支出率 ${financeSummary.income > 0 ? `${Math.round(financeSummary.expenseRate * 100)}%` : "缺少收入"} · ${excludedBills.length} 条不计入</small>
+        </aside>
+      </section>
+
+      <section class="dashboard-priority-section page-standard-section">
+        ${sectionHeader({
+          eyebrow: "KEY METRICS",
+          title: "今日关键指标",
+          description: "首屏只保留最影响今天决策的 4 个指标。",
+        })}
+        <div class="dashboard-metric-grid dashboard-metric-grid--focus">
+          ${dashboardMetricCard("本月现金流", formatCurrency(financeSummary.balance), `收入 ${formatCurrency(financeSummary.income)} / 支出 ${formatCurrency(financeSummary.expense)}`, { page: "bills" }, financeSummary.balance < 0 ? "risk" : "good")}
+          ${dashboardMetricCard("待处理行动", `${openBillActions} 项`, `${doneBillActions}/${billActions.length} 已完成${carriedBillActions ? ` · ${carriedBillActions} 项延续` : ""}`, { billActionsMonth: month }, actionTone)}
+          ${dashboardMetricCard("订阅临期", `${subscriptionsOverview.upcoming?.length || 0} 项`, `月均 ${formatCurrency(subscriptionsOverview.estimatedMonthlyCost)}${subscriptionsOverview.urgent?.length ? ` · ${subscriptionsOverview.urgent.length} 项紧急` : ""}`, { page: "subscriptions" }, subscriptionTone)}
+          ${dashboardMetricCard("事项推进", `${progress}%`, `${pendingTasks.length} 项未完成${overdueTasks.length ? ` · ${overdueTasks.length} 项逾期` : ""}`, { page: "tasks" }, taskTone)}
         </div>
-        <div class="dashboard-command__actions">
-          <button class="primary-button" data-dashboard-open-ledger="${escapeHtml(month)}" type="button">复核完整流水</button>
-          <button class="ghost-button" data-page-jump="bills" type="button">进入生活收支</button>
-          <button class="ghost-button" id="dashboardQuickAdd" type="button">新增记录</button>
-        </div>
-      </div>
-      <aside class="dashboard-command__status dashboard-command__status--${healthStatus === "风险" ? "risk" : healthStatus === "关注" ? "watch" : "good"}">
-        <span>${escapeHtml(month)} 综合评分</span>
-        <strong>${escapeHtml(healthStatus)}</strong>
-        <div class="dashboard-health-meter" style="--dashboard-health:${healthScore}%"><i></i></div>
-        <small>${healthScore} / 100 · 支出率 ${financeSummary.income > 0 ? `${Math.round(financeSummary.expenseRate * 100)}%` : "缺少收入"} · ${excludedBills.length} 条不计入</small>
-      </aside>
-    </section>
-    <div class="dashboard-metric-grid">
-      ${dashboardMetricCard("本月健康状态", healthStatus, `${month} · 支出率 ${financeSummary.income > 0 ? `${Math.round(financeSummary.expenseRate * 100)}%` : "缺少收入"}`, { page: "bills" }, healthTone)}
-      ${dashboardMetricCard("下月风险预告", financeForecast.levelLabel, `${financeForecast.nextMonth.month} 预计结余 ${formatCurrency(financeForecast.nextMonth.balance)}`, { billActionsMonth: month }, forecastTone)}
-      ${dashboardMetricCard("最大风险", topFinanceRisk.title, topFinanceRisk.text, { page: "bills" }, topFinanceRiskTone)}
-      ${dashboardMetricCard("当前预算节奏", budgetPace.label, budgetPace.hint, { page: "bills" }, budgetPace.tone)}
-      ${dashboardMetricCard("行动进度", `${doneBillActions}/${billActions.length} 已完成`, `${openBillActions} 项待推进${carriedBillActions ? ` · ${carriedBillActions} 项延续` : ""}`, { billActionsMonth: month }, actionTone)}
-      ${dashboardMetricCard("本月现金流", formatCurrency(financeSummary.balance), `收入 ${formatCurrency(financeSummary.income)} / 支出 ${formatCurrency(financeSummary.expense)}`, { page: "bills" }, financeSummary.balance < 0 ? "risk" : "good")}
+      </section>
+
+      <section class="dashboard-focus-grid">
+        <section class="panel dashboard-panel page-standard-section dashboard-action-panel">
+          ${sectionHeader({
+            eyebrow: "TODAY ACTION",
+            title: "今日需要处理",
+            description: "优先处理会影响现金流、续费、人情和事项推进的动作。",
+            actions: `<span class="results-count">${queueItems.length} 项</span>`,
+          })}
+          <div class="dashboard-queue-list dashboard-queue-list--focus">${queueItems.slice(0, 6).join("")}</div>
+        </section>
+        <section class="panel dashboard-panel page-standard-section dashboard-risk-panel">
+          ${sectionHeader({
+            eyebrow: "RISK",
+            title: "风险提醒",
+            description: "只展示最关键风险，完整分析放在生活收支页。",
+            actions: `<button class="ghost-button" data-dashboard-open-ledger="${escapeHtml(month)}" type="button">完整流水</button>`,
+          })}
+          <div class="action-risk-panel">
+            ${dashboardRiskItems.map((risk) => actionRiskItem({ title: risk.title, text: risk.text, tone: risk.level })).join("")}
+          </div>
+        </section>
+      </section>
+
+      ${
+        notificationSettings.siteEnabled && subscriptionSummary.total
+          ? `<section class="panel notification-panel dashboard-notification-strip">
+              <div class="panel-head">
+                <div>
+                  <span class="eyebrow">SUBSCRIPTION</span>
+                  <h2>订阅到期提醒</h2>
+                </div>
+                <button class="ghost-button" data-page-jump="subscriptions" type="button">查看订阅</button>
+              </div>
+              <div class="tag-row">
+                <span class="tag">已过期 ${subscriptionSummary.groups.expired.length}</span>
+                <span class="tag">今天 ${subscriptionSummary.groups.today.length}</span>
+                <span class="tag">7 天内 ${subscriptionSummary.groups.week.length}</span>
+                <span class="tag">30 天内 ${subscriptionSummary.groups.month.length}</span>
+              </div>
+            </section>`
+          : ""
+      }
+
+      <section class="dashboard-lower-grid">
+        <section class="panel dashboard-panel page-standard-section">
+          ${sectionHeader({
+            eyebrow: "TREND",
+            title: "近 6 月收支趋势",
+            description: "用于复盘，不抢占今日行动区。",
+            actions: `<span class="results-count">红收入 / 绿支出</span>`,
+          })}
+          ${trendRows.length ? dashboardTrendBars(trendRows) : emptyState("暂无趋势数据")}
+        </section>
+        <section class="panel dashboard-panel page-standard-section">
+          ${sectionHeader({
+            eyebrow: "REVIEW",
+            title: "复盘摘要",
+            description: "跨模块观察，帮助判断下一步整理方向。",
+            actions: `<button class="ghost-button" data-page-jump="favors" type="button">人情台账</button>`,
+          })}
+          <div class="dashboard-review-grid">
+            <article><span>人情差额</span><strong>${formatCurrency(Math.abs(favorStats.balance || 0))}</strong><small>${escapeHtml(balanceCopy)}</small></article>
+            <article><span>订阅月均</span><strong>${formatCurrency(subscriptionsOverview.estimatedMonthlyCost)}</strong><small>${subscriptionsOverview.upcoming.length} 项 30 天内到期</small></article>
+            <article><span>事项完成</span><strong>${progress}%</strong><small>${pendingTasks.length} 项未完成</small></article>
+            <article><span>最大风险</span><strong>${escapeHtml(topFinanceRisk.title)}</strong><small>${escapeHtml(topFinanceRisk.text)}</small></article>
+          </div>
+        </section>
+        <section class="panel dashboard-panel dashboard-recent-panel page-standard-section">
+          ${sectionHeader({
+            eyebrow: "RECENT",
+            title: "最近访问",
+            description: "保留最近使用路径，方便回到刚处理的记录。",
+            actions: ui.searchTerm ? '<button class="ghost-button" id="openSearchPage" type="button">查看搜索结果</button>' : "",
+          })}
+          <div class="recent-list">${visibleRecentViews.slice(0, 4).map(recentViewRow).join("") || emptyState("还没有浏览记录")}</div>
+        </section>
+        <section class="panel dashboard-panel dashboard-task-panel page-standard-section">
+          ${sectionHeader({
+            eyebrow: "TODAY",
+            title: "今日事项",
+            description: todayTasks.length ? "截止今天的事项优先处理。" : "暂无今日截止事项，展示未完成事项。",
+            actions: `<button class="ghost-button" data-page-jump="tasks" type="button">查看全部</button>`,
+          })}
+          <div class="list-stack">${dashboardTasks.map(taskRow).join("") || emptyState("暂无事项")}</div>
+        </section>
+      </section>
     </div>
-    <section class="dashboard-system-grid">
-      ${dashboardModuleCard("生活收支", healthStatus, `结余 ${formatCurrency(financeSummary.balance)} · 预算 ${budgetPace.label}`, { page: "bills" }, healthTone)}
-      ${dashboardModuleCard("人情往来", formatCurrency(Math.abs(favorStats.balance || 0)), balanceCopy, { page: "favors" }, favorTone)}
-      ${dashboardModuleCard("订阅续费", `${subscriptionsOverview.upcoming?.length || 0} 项`, `月均 ${formatCurrency(subscriptionsOverview.estimatedMonthlyCost)}`, { page: "subscriptions" }, subscriptionTone)}
-      ${dashboardModuleCard("事项推进", `${progress}%`, `${pendingTasks.length} 项未完成${overdueTasks.length ? ` · ${overdueTasks.length} 项逾期` : ""}`, { page: "tasks" }, taskTone)}
-    </section>
-    ${
-      notificationSettings.siteEnabled && subscriptionSummary.total
-        ? `<section class="panel notification-panel">
-            <div class="panel-head">
-              <h2>订阅到期提醒</h2>
-              <button class="ghost-button" data-page-jump="subscriptions" type="button">查看订阅</button>
-            </div>
-            <div class="tag-row">
-              <span class="tag">已过期 ${subscriptionSummary.groups.expired.length}</span>
-              <span class="tag">今天 ${subscriptionSummary.groups.today.length}</span>
-              <span class="tag">7 天内 ${subscriptionSummary.groups.week.length}</span>
-              <span class="tag">30 天内 ${subscriptionSummary.groups.month.length}</span>
-            </div>
-          </section>`
-        : ""
-    }
-    <div class="dashboard-main-grid">
-      <section class="panel dashboard-panel">
-        <div class="panel-head">
-          <div>
-            <span class="eyebrow">RISK</span>
-            <h2>风险提醒</h2>
-          </div>
-          <button class="ghost-button" data-dashboard-open-ledger="${escapeHtml(month)}" type="button">完整流水</button>
-        </div>
-        <div class="dashboard-risk-list">
-          ${financeRisks.map((risk) => `<article class="dashboard-risk-item dashboard-risk-item--${escapeHtml(risk.level)}"><strong>${escapeHtml(risk.title)}</strong><span>${escapeHtml(risk.text)}</span></article>`).join("")}
-        </div>
-      </section>
-      <section class="panel dashboard-panel">
-        <div class="panel-head">
-          <div>
-            <span class="eyebrow">ACTION</span>
-            <h2>待处理队列</h2>
-          </div>
-          <span class="results-count">${queueItems.length} 项</span>
-        </div>
-        <div class="dashboard-queue-list">${queueItems.join("")}</div>
-      </section>
-      <section class="panel dashboard-panel">
-        <div class="panel-head">
-          <div>
-            <span class="eyebrow">TREND</span>
-            <h2>近 6 月收支趋势</h2>
-          </div>
-          <span class="results-count">红收入 / 绿支出</span>
-        </div>
-        ${trendRows.length ? dashboardTrendBars(trendRows) : emptyState("暂无趋势数据")}
-      </section>
-      <section class="panel dashboard-panel">
-        <div class="panel-head">
-          <div>
-            <span class="eyebrow">REVIEW</span>
-            <h2>复盘摘要</h2>
-          </div>
-          <button class="ghost-button" data-page-jump="favors" type="button">人情台账</button>
-        </div>
-        <div class="dashboard-review-grid">
-          <article><span>人情差额</span><strong>${formatCurrency(Math.abs(favorStats.balance || 0))}</strong><small>${escapeHtml(balanceCopy)}</small></article>
-          <article><span>订阅月均</span><strong>${formatCurrency(subscriptionsOverview.estimatedMonthlyCost)}</strong><small>${subscriptionsOverview.upcoming.length} 项 30 天内到期</small></article>
-          <article><span>事项完成</span><strong>${progress}%</strong><small>${pendingTasks.length} 项未完成</small></article>
-          <article><span>最近导入</span><strong>${latestImport ? `${latestImport.imported || 0} 条` : "暂无"}</strong><small>${latestImport?.mode || "未导入"}</small></article>
-        </div>
-      </section>
-    </div>
-    <section class="panel dashboard-panel dashboard-recent-panel">
-      <div class="panel-head">
-        <div>
-          <span class="eyebrow">RECENT</span>
-          <h2>最近访问</h2>
-        </div>
-        ${ui.searchTerm ? '<button class="ghost-button" id="openSearchPage" type="button">查看搜索结果</button>' : ""}
-      </div>
-      <div class="recent-list">${visibleRecentViews.slice(0, 6).map(recentViewRow).join("") || emptyState("还没有浏览记录")}</div>
-    </section>
-    <section class="panel dashboard-panel dashboard-task-panel">
-      <div class="panel-head">
-        <div>
-          <span class="eyebrow">TODAY</span>
-          <h2>今日事项</h2>
-        </div>
-        <button class="ghost-button" data-page-jump="tasks" type="button">查看全部</button>
-      </div>
-      <div class="list-stack">${(todayTasks.length ? todayTasks : pendingTasks.slice(0, 4)).map(taskRow).join("") || emptyState("暂无事项")}</div>
-    </section>
   `;
 }
 
@@ -4277,6 +4283,7 @@ function renderBills(elements, data, ui, store) {
   const risks = buildFinanceRisks(summary, commitments);
 
   elements.contentArea.innerHTML = `
+    <div class="page-standard-stack core-page-shell">
     <div class="bill-dashboard-layout">
       <main class="bill-dashboard-layout__main">
         ${billCommandHero(summary, commitments, risks)}
@@ -4301,6 +4308,12 @@ function renderBills(elements, data, ui, store) {
         ${financeEntryPanel(month)}
         ${futurePlanEntryPanel(month)}
       </aside>
+    </div>
+    ${toolsPanel({
+      title: "低频财务工具",
+      description: "导入、月报、预测和 AI 问答保留在财务页面内，但不抢占首屏行动区。",
+      actions: `<button class="ghost-button" data-open-bill-ledger type="button">打开完整流水</button><button class="ghost-button" data-create-bill-review="${escapeHtml(summary.month)}" type="button">保存月报</button>`,
+    })}
     </div>
     ${billLedgerModal(data.bills || [], month, data, ui.filters.billLedgerCategory || "")}
     <button class="finance-qa-float" data-finance-qa-float data-finance-qa="${escapeHtml(month)}" type="button" aria-label="打开财务问答助手" title="拖动调整位置，点击打开问答">
@@ -4607,8 +4620,8 @@ function renderSubscriptionKpis(overview) {
     <div class="subscription-control-kpis" aria-label="订阅关键指标">
       ${statCard("月均成本", formatCurrency(overview.estimatedMonthlyCost), `年化 ${formatCurrency(overview.estimatedAnnualCost)}`)}
       ${statCard("30天扣费", formatCurrency(overview.nextThirtyDaysTotal || 0), `${overview.upcoming.length} 项即将到期`)}
-      ${statCard("预算节奏", monthlyBudget ? `${formatCurrency(overview.estimatedMonthlyCost)} / ${formatCurrency(monthlyBudget)}` : formatCurrency(overview.estimatedMonthlyCost), budgetText)}
-      ${statCard("待复盘", overview.reviewQueue.length, `${overview.cancellable.length || 0} 项可优化`)}
+      ${statCard("90天扣费", formatCurrency(overview.nextNinetyDaysTotal || 0), `${overview.nextNinetyDaysCount || 0} 次预计扣费`)}
+      ${statCard("待评估", overview.evaluationQueue.length, `${overview.lowFrequencyCancellable.length || 0} 项低频可砍`)}
     </div>
   `;
 }
@@ -4628,6 +4641,53 @@ function renderSubscriptionRiskPanel(overview) {
       </div>
       <div class="subscription-list subscription-risk-list">
         ${queue.map(subscriptionCompactRow).join("") || emptyState("当前没有需要优先处理的订阅")}
+      </div>
+    </section>
+  `;
+}
+
+function renderSubscriptionHealthPanel(overview) {
+  const healthItems = (overview.healthQueue || []).slice(0, 6);
+  const evaluationItems = (overview.evaluationQueue || []).slice(0, 4);
+  const healthRows = healthItems
+    .map(
+      (item) => `
+        <article class="subscription-health-row subscription-health-row--${escapeHtml(item.health?.level || "watch")}">
+          <div>
+            <span>${escapeHtml(item.health?.label || "继续观察")}</span>
+            <strong>${escapeHtml(item.name)}</strong>
+            <small>${escapeHtml((item.health?.reasons || []).slice(0, 2).join(" / ") || item.advice?.reason || "暂无明显风险")}</small>
+          </div>
+          <button class="ghost-button" data-subscription-evaluated="${escapeHtml(item.id)}" type="button">标记已评估</button>
+        </article>
+      `,
+    )
+    .join("");
+  const evaluationRows = evaluationItems
+    .map(
+      (item) => `
+        <article class="subscription-evaluation-row">
+          <div>
+            <strong>${escapeHtml(item.name)}</strong>
+            <span>${escapeHtml(item.review?.label || item.health?.label || "建议复盘")}</span>
+          </div>
+          <button class="ghost-button" data-subscription-reminder="${escapeHtml(item.id)}" type="button">创建提醒事项</button>
+        </article>
+      `,
+    )
+    .join("");
+  return `
+    <section class="panel subscription-health-panel">
+      <div class="panel-head">
+        <div>
+          <h2>健康状态与评估队列</h2>
+          <p class="panel-copy">把低频可砍、长期未使用、价格异常和临期续费集中处理。</p>
+        </div>
+        <span class="results-count">${healthItems.length} 项关注</span>
+      </div>
+      <div class="subscription-health-layout">
+        <div class="subscription-health-list">${healthRows || emptyState("当前没有明显订阅健康风险")}</div>
+        <div class="subscription-evaluation-list">${evaluationRows || emptyState("暂无需要创建提醒的订阅")}</div>
       </div>
     </section>
   `;
@@ -4725,25 +4785,24 @@ function renderSubscriptions(elements, data, ui, store) {
   );
 
   elements.contentArea.innerHTML = `
-    <div class="subscription-control-shell">
+    <div class="subscription-control-shell page-standard-stack core-page-shell">
       ${renderSubscriptionDuePanel(overview)}
       ${renderSubscriptionControlHero(overview)}
       ${renderSubscriptionKpis(overview)}
       <div class="subscription-control-layout">
         <main class="subscription-control-main">
           ${renderSubscriptionRiskPanel(overview)}
+          ${renderSubscriptionHealthPanel(overview)}
           <div class="subscription-control-two">
             ${renderSubscriptionDistributionPanel(overview)}
             ${renderSubscriptionForecastPanel(overview)}
           </div>
-          <section class="panel subscription-list-panel subscription-detail-card-panel">
-            <div class="panel-head">
-              <div>
-                <h2>订阅详情卡片</h2>
-                <p class="panel-copy">保留完整操作：记账、续费、复盘、暂停和取消。</p>
-              </div>
-              <span class="results-count">共 ${items.length} 项</span>
-            </div>
+          <section class="panel subscription-list-panel subscription-detail-card-panel page-standard-section">
+            ${sectionHeader({
+              title: "订阅详情卡片",
+              description: "保留完整操作：记账、续费、复盘、暂停和取消。",
+              actions: `<span class="results-count">共 ${items.length} 项</span>`,
+            })}
             <div class="card-grid compact-card-grid subscription-detail-card-grid">
               ${items.map(subscriptionCard).join("") || emptyState("还没有记录订阅项目")}
             </div>
@@ -5518,7 +5577,7 @@ function renderFavors(elements, data, ui, store) {
     .sort((left, right) => compareBySort(left, right, ui.sortBy));
 
   elements.contentArea.innerHTML = `
-    <div class="favor-dashboard-layout">
+    <div class="favor-dashboard-layout page-standard-stack core-page-shell">
       <main class="favor-dashboard-layout__main">
         <div class="stats-grid favor-stats-grid">
           ${statCard("关系人", favorStats.totalContacts, "已建立关系")}
@@ -5528,7 +5587,7 @@ function renderFavors(elements, data, ui, store) {
         </div>
         ${favorPeriodPanel(favorPeriodOverview)}
         ${favorInsightPanels(favorInsightOverview)}
-        <details class="panel favor-collapsible-panel" open>
+        <details class="panel favor-collapsible-panel page-standard-section" open>
           <summary class="favor-collapsible-summary">
             <span class="favor-collapsible-title">
               <b>人物关系台账</b>
@@ -5542,7 +5601,7 @@ function renderFavors(elements, data, ui, store) {
           </div>
           <div class="favor-ledger-empty" id="favorLedgerEmpty" hidden>没有符合筛选条件的人物</div>
         </details>
-        <details class="panel favor-collapsible-panel" open>
+        <details class="panel favor-collapsible-panel page-standard-section" open>
           <summary class="favor-collapsible-summary">
             <span class="favor-collapsible-title">
               <b>往来记录</b>
@@ -5741,9 +5800,23 @@ function renderFavorites(elements, data, ui) {
   `;
 }
 
+function buildSettingsSubscriptionPreviewItems(subscriptions) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return (subscriptions || []).map((item) => {
+    const target = item.nextRenewalDate ? new Date(item.nextRenewalDate) : null;
+    const daysUntilRenewal = target && !Number.isNaN(target.getTime()) ? Math.round((target.setHours(0, 0, 0, 0) - today.getTime()) / (24 * 60 * 60 * 1000)) : null;
+    const monthlyCost = item.cycle === "yearly" ? Number(item.amount || 0) / 12 : item.cycle === "quarterly" ? Number(item.amount || 0) / 3 : Number(item.amount || 0);
+    const reminderLabel = daysUntilRenewal === null ? "未设置到期" : daysUntilRenewal < 0 ? `已过期 ${Math.abs(daysUntilRenewal)} 天` : daysUntilRenewal === 0 ? "今天到期" : `${daysUntilRenewal} 天后到期`;
+    const adviceLevel = item.usageFrequency === "rare" || Number(item.satisfaction || 0) <= 2 ? "warning" : "normal";
+    return { ...item, daysUntilRenewal, monthlyCost, reminderLabel, advice: { level: adviceLevel } };
+  });
+}
+
 function renderSettings(elements, data, ui, authController) {
   renderControls(elements, data, ui, "settings");
   const notificationSettings = loadSubscriptionNotificationSettings();
+  const subscriptionEmailPreview = buildSubscriptionEmailPreview(buildSettingsSubscriptionPreviewItems(data.subscriptions || []), notificationSettings);
   const serverSyncState = loadServerSyncState();
   const currentUser = authController?.user || null;
   const isServerAccount = Boolean(authController?.isServerAuthenticated);
@@ -6056,6 +6129,11 @@ function renderSettings(elements, data, ui, authController) {
               <input name="email" type="email" value="${escapeHtml(notificationSettings.email)}" placeholder="you@example.com" />
             </label>
           </div>
+        </div>
+        <div class="subscription-email-preview">
+          <span class="settings-form-title">邮件预览</span>
+          <strong>${escapeHtml(subscriptionEmailPreview.subject)}</strong>
+          <pre>${escapeHtml(subscriptionEmailPreview.text)}</pre>
         </div>
         <div class="settings-action-row">
           <button class="ghost-button" id="requestBrowserNotification" type="button">开启浏览器通知</button>

@@ -2937,6 +2937,32 @@ export function bindEvents(app, elements, renderer, formController, authControll
       return;
     }
 
+    const subscriptionEvaluatedButton = event.target.closest("[data-subscription-evaluated]");
+    if (subscriptionEvaluatedButton) {
+      if (!(await ensureAuth())) return;
+      const nextReviewDate = app.store.markSubscriptionEvaluated(subscriptionEvaluatedButton.dataset.subscriptionEvaluated);
+      if (!nextReviewDate) {
+        window.alert("标记评估失败，请确认订阅仍然存在。");
+        return;
+      }
+      window.alert(`已标记为已评估，下次复盘日期为 ${nextReviewDate}。`);
+      renderer.render();
+      return;
+    }
+
+    const subscriptionReminderButton = event.target.closest("[data-subscription-reminder]");
+    if (subscriptionReminderButton) {
+      if (!(await ensureAuth())) return;
+      const taskId = app.store.createSubscriptionReminderTask(subscriptionReminderButton.dataset.subscriptionReminder);
+      if (!taskId) {
+        window.alert("创建提醒事项失败，请确认订阅仍然存在。");
+        return;
+      }
+      window.alert("已创建续费/评估提醒事项。");
+      renderer.render();
+      return;
+    }
+
     const convertNoteButton = event.target.closest("[data-convert-note]");
     if (convertNoteButton) {
       if (!(await ensureAuth())) return;

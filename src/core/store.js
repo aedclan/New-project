@@ -1,6 +1,6 @@
 ﻿import { RECENT_VIEWS_KEY, STORAGE_KEY } from "../config/constants.js";
 import { defaultData } from "../data/default-data.js";
-import { clone, excerptText } from "./utils.js";
+import { clone, excerptText, formatCurrency } from "./utils.js";
 
 let idCounter = 0;
 
@@ -1040,6 +1040,16 @@ function buildSubscriptionForecast(subscriptions, months = 6) {
         return days !== null && days >= 0 && days <= 30;
       })
       .reduce((sum, item) => sum + Number(item.amount || 0), 0),
+    nextNinetyDaysTotal: forecastItems
+      .filter((item) => {
+        const days = getDaysUntil(item.date);
+        return days !== null && days >= 0 && days <= 90;
+      })
+      .reduce((sum, item) => sum + Number(item.amount || 0), 0),
+    nextNinetyDaysCount: forecastItems.filter((item) => {
+      const days = getDaysUntil(item.date);
+      return days !== null && days >= 0 && days <= 90;
+    }).length,
   };
 }
 
@@ -1087,6 +1097,60 @@ function getSubscriptionReview(item, monthlyCost) {
     level,
     label: reasons.length ? reasons.slice(0, 2).join("、") : "无需立即复盘",
   };
+}
+
+function daysSince(dateText) {
+  const daysUntil = getDaysUntil(dateText);
+  return daysUntil === null ? null : -daysUntil;
+}
+
+function getSubscriptionHealth(item, monthlyCost, allSubscriptions = []) {
+  const reasons = [];
+  const usage = item.usageFrequency || "unknown";
+  const necessity = item.necessity || "optional";
+  const satisfaction = Number(item.satisfaction || 0);
+  const daysUnused = daysSince(item.lastUsedAt);
+  const categoryPeers = allSubscriptions.filter((peer) => (peer.category || "订阅") === (item.category || "订阅"));
+  const categoryAverage = averageAmount(categoryPeers.map((peer) => ({ amount: getSubscriptionMonthlyCost(peer) })));
+  const priceAnomaly = monthlyCost >= 100 && categoryAverage > 0 && monthlyCost >= categoryAverage * 1.8;
+
+  if (item.status === "cancelled") return { key: "healthy", label: "已取消", level: "muted", reasons: ["保留历史记录"] };
+  if (priceAnomaly) reasons.push(`月均高于同类均值 ${formatCurrency(categoryAverage)}`);
+  if (item.daysUntilRenewal !== null && item.daysUntilRenewal >= 0 && item.daysUntilRenewal <= 7) reasons.push("7 天内续费");
+  if (daysUnused !== null && daysUnused >= 60) reasons.push(`已 ${daysUnused} 天未记录使用`);
+  if (usage === "rare" && necessity !== "essential") reasons.push("低频且非刚需");
+  if (satisfaction > 0 && satisfaction <= 2) reasons.push("满意度偏低");
+  if (usage === "high" && necessity === "essential") reasons.push("高频刚需");
+
+  if (priceAnomaly) return { key: "price-anomaly", label: "价格异常", level: "risk", reasons };
+  if (daysUnused !== null && daysUnused >= 60) return { key: "long-unused", label: "长期未使用", level: "risk", reasons };
+  if (usage === "rare" && necessity !== "essential") return { key: "low-frequency-cancellable", label: "低频可砍", level: "watch", reasons };
+  if (item.daysUntilRenewal !== null && item.daysUntilRenewal >= 0 && item.daysUntilRenewal <= 7) return { key: "upcoming-renewal", label: "即将续费", level: "watch", reasons };
+  if (usage === "high" && necessity === "essential") return { key: "high-frequency-essential", label: "高频刚需", level: "good", reasons };
+  return { key: "healthy", label: "继续观察", level: reasons.length ? "watch" : "good", reasons: reasons.length ? reasons : ["暂无明显风险"] };
+}
+
+function findLatestSubscriptionPayment(bills, subscription) {
+  const matches = (bills || [])
+    .filter((bill) => bill.subscriptionId === subscription.id || bill.id === subscription.lastBillId)
+    .sort((left, right) => String(right.date || right.updatedAt || "").localeCompare(String(left.date || left.updatedAt || "")));
+  const latest = matches[0];
+  if (!latest) return null;
+  return {
+    id: latest.id,
+    title: latest.title || `${subscription.name} 订阅扣费`,
+    date: latest.date || latest.updatedAt || "",
+    amount: Number(latest.amount || 0),
+    source: latest.source || latest.paymentMethod || "订阅扣费",
+  };
+}
+
+function isSubscriptionReviewDue(item) {
+  return item.status !== "cancelled" && (item.review?.reasons?.length || item.health?.level === "risk" || item.health?.key === "low-frequency-cancellable");
+}
+
+function isSubscriptionWithinDays(item, days) {
+  return item.daysUntilRenewal !== null && item.daysUntilRenewal >= 0 && item.daysUntilRenewal <= days;
 }
 
 function isDoneStatus(status) {
@@ -2357,15 +2421,54 @@ export function createStore() {
       save();
       return true;
     },
-    reviewSubscription(subscriptionId) {
+    reviewSubscription(subscriptionId, payload = {}) {
       const today = new Date().toISOString().slice(0, 10);
       const subscription = (data.subscriptions || []).find((item) => item.id === subscriptionId);
       if (!subscription) return false;
       subscription.lastReviewedAt = today;
-      subscription.nextReviewDate = addDays(today, 30);
+      subscription.evaluatedAt = payload.evaluatedAt || subscription.evaluatedAt || today;
+      subscription.lastUsedAt = String(payload.lastUsedAt || subscription.lastUsedAt || "").trim();
+      subscription.satisfaction = Number(payload.satisfaction || subscription.satisfaction || 0);
+      subscription.worthContinuing = String(payload.worthContinuing || subscription.worthContinuing || "").trim();
+      subscription.reviewDecision = String(payload.reviewDecision || subscription.reviewDecision || "watch").trim();
+      subscription.reviewNotes = String(payload.reviewNotes || subscription.reviewNotes || "").trim();
+      subscription.nextReviewDate = String(payload.nextReviewDate || "").trim() || addDays(today, 30);
       subscription.updatedAt = today;
       save();
       return subscription.nextReviewDate;
+    },
+    markSubscriptionEvaluated(subscriptionId) {
+      return this.reviewSubscription(subscriptionId, {
+        evaluatedAt: new Date().toISOString().slice(0, 10),
+        reviewDecision: "watch",
+      });
+    },
+    createSubscriptionReminderTask(subscriptionId) {
+      const today = new Date().toISOString().slice(0, 10);
+      const subscription = (data.subscriptions || []).find((item) => item.id === subscriptionId);
+      if (!subscription) return false;
+      const dueDate = subscription.nextRenewalDate || addDays(today, 7);
+      const taskId = createId("t");
+      data.tasks = data.tasks || [];
+      data.tasks.unshift({
+        id: taskId,
+        title: `评估/续费 ${subscription.name}`,
+        description: `订阅 ${subscription.name} 将在 ${dueDate || "近期"} 续费，建议确认是否继续使用。`,
+        status: "待处理",
+        priority: isSubscriptionWithinDays({ daysUntilRenewal: getDaysUntil(dueDate) }, 7) ? "高" : "中",
+        dueDate,
+        projectId: subscription.projectId || "",
+        tags: ["订阅", "续费提醒", subscription.category].filter(Boolean),
+        isFavorite: false,
+        subscriptionId: subscription.id,
+        createdAt: today,
+        updatedAt: today,
+      });
+      subscription.nextActionReminderDate = dueDate;
+      subscription.lastReminderTaskId = taskId;
+      subscription.updatedAt = today;
+      save();
+      return taskId;
     },
     markFavorReturned(favorEventId, returnEventId = "") {
       const event = (data.favorEvents || []).find((item) => item.id === favorEventId);
@@ -2452,6 +2555,8 @@ export function createStore() {
           const reminder = getSubscriptionReminder(daysUntilRenewal);
           const advice = getSubscriptionAdvice(item, monthlyCost);
           const review = getSubscriptionReview({ ...item, daysUntilRenewal }, monthlyCost);
+          const health = getSubscriptionHealth({ ...item, daysUntilRenewal }, monthlyCost, data.subscriptions || []);
+          const latestPayment = findLatestSubscriptionPayment(data.bills || [], item);
           return {
             ...item,
             daysUntilRenewal,
@@ -2461,6 +2566,8 @@ export function createStore() {
             level: reminder.level,
             advice,
             review,
+            health,
+            latestPayment,
           };
         })
         .sort((left, right) => {
@@ -2508,6 +2615,9 @@ export function createStore() {
         };
       });
       const forecast = buildSubscriptionForecast(subscriptions, 6);
+      const healthTotals = buildTotals(subscriptions, (item) => item.health?.label || "继续观察");
+      const healthQueue = subscriptions.filter((item) => item.status !== "cancelled" && ["risk", "watch"].includes(item.health?.level));
+      const evaluationQueue = subscriptions.filter(isSubscriptionReviewDue);
 
       return {
         items: subscriptions,
@@ -2526,6 +2636,8 @@ export function createStore() {
         forecastItems: forecast.forecastItems,
         forecastMonthlyTotals: forecast.forecastMonthlyTotals,
         nextThirtyDaysTotal: forecast.nextThirtyDaysTotal,
+        nextNinetyDaysTotal: forecast.nextNinetyDaysTotal,
+        nextNinetyDaysCount: forecast.nextNinetyDaysCount,
         upcoming: subscriptions.filter((item) => item.daysUntilRenewal !== null && item.daysUntilRenewal >= 0 && item.daysUntilRenewal <= 30),
         urgent: subscriptions.filter((item) => item.level === "urgent" || item.level === "expired"),
         expired: subscriptions.filter((item) => item.level === "expired"),
@@ -2535,6 +2647,13 @@ export function createStore() {
         cancellable: subscriptions.filter((item) => item.advice.level === "danger" || item.advice.label.includes("取消")),
         highCost: subscriptions.filter((item) => Number(item.monthlyCost || 0) >= 100),
         reviewQueue: subscriptions.filter((item) => item.status !== "cancelled" && item.review.reasons.length > 0),
+        healthQueue,
+        evaluationQueue,
+        healthTotals,
+        healthStateTotals: healthTotals,
+        priceAnomalies: subscriptions.filter((item) => item.health?.key === "price-anomaly"),
+        longUnused: subscriptions.filter((item) => item.health?.key === "long-unused"),
+        lowFrequencyCancellable: subscriptions.filter((item) => item.health?.key === "low-frequency-cancellable"),
         categoryTotals,
         ownerTotals: buildTotals(activeSubscriptions, (item) => item.owner || item.payer || "家庭账户"),
         paymentTotals: buildTotals(activeSubscriptions, (item) => item.paymentMethod || "未指定"),
