@@ -256,7 +256,7 @@ export function subscriptionCard(item) {
     <article class="content-card subscription-card subscription-info-card subscription-card--${escapeHtml(item.level || "normal")}">
       <div class="subscription-info-card__top">
         <span>${escapeHtml(item.category || "订阅")}</span>
-        <strong>${escapeHtml(item.reminderLabel || renewalLabel)}</strong>
+        <strong class="subscription-info-card__countdown">${escapeHtml(item.reminderLabel || renewalLabel)}</strong>
       </div>
       <div class="subscription-info-card__main">
         <div>
@@ -313,6 +313,7 @@ export function subscriptionCard(item) {
             ? ""
             : `<button class="ghost-button" data-subscription-status="${escapeHtml(item.id)}:cancelled" type="button">取消</button>`
         }
+        <button class="ghost-button danger-button" data-delete="subscriptions:${escapeHtml(item.id)}" type="button">删除</button>
       </div>
     </article>
   `;

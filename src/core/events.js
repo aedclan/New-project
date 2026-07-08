@@ -1042,6 +1042,11 @@ export function bindEvents(app, elements, renderer, formController, authControll
   }
 
   function showFinanceQaDialog(month) {
+    const openedDialog = document.querySelector(".finance-qa-modal[open]");
+    if (openedDialog) {
+      openedDialog.querySelector('[name="question"]')?.focus();
+      return;
+    }
     const dialog = document.createElement("dialog");
     dialog.className = "modal finance-qa-modal";
     const samples = ["为什么这个月风险高？", "钱主要花到哪里了？", "下个月怎么控制？", "如果餐饮减少 20%，结余会变多少？", "哪些订阅可以暂停？", "未来三个月压力大不大？"];
@@ -1087,7 +1092,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
       dialog.remove();
     };
     dialog.addEventListener("click", (event) => {
-      if (event.target === dialog || event.target.closest("[data-close-finance-qa]")) close();
+      if (event.target.closest("[data-close-finance-qa]")) close();
       if (event.target.closest("[data-finance-qa-avatar-reset]")) {
         localStorage.removeItem(FINANCE_QA_AVATAR_KEY);
         applyFinanceQaAvatar();
@@ -1127,7 +1132,7 @@ export function bindEvents(app, elements, renderer, formController, authControll
       close();
     });
     document.body.appendChild(dialog);
-    dialog.showModal();
+    dialog.show();
     applyFinanceQaAvatar(dialog);
   }
 

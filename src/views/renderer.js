@@ -4555,6 +4555,7 @@ function subscriptionCompactRow(item) {
         <button class="ghost-button" data-subscription-bill="${escapeHtml(item.id)}" type="button">记账</button>
         <button class="primary-button" data-subscription-renew="${escapeHtml(item.id)}" type="button">续费</button>
         <button class="ghost-button" data-subscription-review="${escapeHtml(item.id)}" type="button">复盘</button>
+        <button class="ghost-button danger-button" data-delete="subscriptions:${escapeHtml(item.id)}" type="button">删除</button>
       </div>
     </article>
   `;
@@ -4667,6 +4668,48 @@ function renderSubscriptionForecastPanel(overview) {
   `;
 }
 
+function renderSubscriptionDuePanel(overview) {
+  const dueItems = overview.upcoming || [];
+  const primary = dueItems[0];
+  const secondary = dueItems.slice(1, 4);
+  const dueCard = (item, isPrimary = false) => `
+    <article class="subscription-alert ${isPrimary ? "subscription-alert--primary" : "subscription-alert--compact"} subscription-alert--${escapeHtml(item.level || "normal")}">
+      <div class="subscription-alert__meta">
+        <span class="subscription-alert__status ${item.level === "urgent" || item.level === "expired" ? "is-danger" : ""}">${escapeHtml(item.reminderLabel)}</span>
+        <span>${escapeHtml(item.nextRenewalDate || "未设置")}</span>
+        ${item.autoRenew ? "<span>自动续费</span>" : "<span>手动续费</span>"}
+      </div>
+      <div class="subscription-alert__body">
+        <strong>${escapeHtml(item.name)}</strong>
+        <p>${formatCurrency(item.amount)} / 月均 ${formatCurrency(item.monthlyCost)}</p>
+      </div>
+      ${isPrimary ? `<div class="subscription-alert__action">优先确认续费、复盘或暂停</div>` : ""}
+    </article>
+  `;
+
+  return `
+    <section class="panel subscription-due-panel subscription-due-panel--top">
+      <div class="panel-head">
+        <div>
+          <h2>到期提醒</h2>
+          <p class="panel-copy">30 天内的扣费和续费动作，优先处理最近到期项目。</p>
+        </div>
+        <span class="results-count">${dueItems.length} 项</span>
+      </div>
+      ${
+        dueItems.length
+          ? `<div class="subscription-due-showcase">
+              ${primary ? dueCard(primary, true) : ""}
+              <div class="subscription-due-secondary">
+                ${secondary.map((item) => dueCard(item)).join("")}
+              </div>
+            </div>`
+          : emptyState("30 天内没有到期订阅")
+      }
+    </section>
+  `;
+}
+
 function renderSubscriptions(elements, data, ui, store) {
   elements.filterRow.innerHTML = "";
   const overview = store.getSubscriptionsOverview();
@@ -4683,6 +4726,7 @@ function renderSubscriptions(elements, data, ui, store) {
 
   elements.contentArea.innerHTML = `
     <div class="subscription-control-shell">
+      ${renderSubscriptionDuePanel(overview)}
       ${renderSubscriptionControlHero(overview)}
       ${renderSubscriptionKpis(overview)}
       <div class="subscription-control-layout">
@@ -4702,34 +4746,6 @@ function renderSubscriptions(elements, data, ui, store) {
             </div>
             <div class="card-grid compact-card-grid subscription-detail-card-grid">
               ${items.map(subscriptionCard).join("") || emptyState("还没有记录订阅项目")}
-            </div>
-          </section>
-          <section class="panel subscription-due-panel">
-            <div class="panel-head">
-              <div>
-                <h2>到期提醒</h2>
-                <p class="panel-copy">30 天内的扣费和续费动作。</p>
-              </div>
-              <span class="results-count">${overview.upcoming.length} 项</span>
-            </div>
-            <div class="subscription-due-list">
-              ${
-                overview.upcoming
-                  .map(
-                    (item) => `
-                      <article class="search-result-card subscription-alert subscription-alert--${escapeHtml(item.level || "normal")}">
-                        <div class="meta-row">
-                          <span class="tag ${item.level === "urgent" || item.level === "expired" ? "tag-danger" : ""}">${escapeHtml(item.reminderLabel)}</span>
-                          <span>${escapeHtml(item.nextRenewalDate || "未设置")}</span>
-                          ${item.autoRenew ? '<span class="tag">自动续费</span>' : '<span class="tag">手动续费</span>'}
-                        </div>
-                        <strong>${escapeHtml(item.name)}</strong>
-                        <p>${formatCurrency(item.amount)} / 月均 ${formatCurrency(item.monthlyCost)}</p>
-                      </article>
-                    `,
-                  )
-                  .join("") || emptyState("30 天内没有到期订阅")
-              }
             </div>
           </section>
         </main>
